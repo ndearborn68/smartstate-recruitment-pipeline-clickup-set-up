@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartState – Multi-Channel Recruitment Pipeline v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+  .app { display: flex; height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { width: 260px; background: #16213e; border-right: 1px solid #2a2a4a; padding: 16px 0; overflow-y: auto; flex-shrink: 0; }
+  .sidebar-header { padding: 0 16px 16px; border-bottom: 1px solid #2a2a4a; margin-bottom: 12px; }
+  .sidebar-header h2 { font-size: 14px; color: #7b68ee; text-transform: uppercase; letter-spacing: 1px; }
+  .sidebar-header .workspace { font-size: 18px; font-weight: 700; color: #fff; margin-top: 4px; }
+  .nav-section { padding: 0 8px; margin-bottom: 8px; }
+  .nav-section-title { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; padding: 8px; }
+  .nav-item { display: flex; align-items: center; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; color: #b0b0b0; transition: all 0.15s; gap: 8px; }
+  .nav-item:hover { background: #1e2d50; color: #fff; }
+  .nav-item.active { background: #7b68ee22; color: #7b68ee; font-weight: 600; }
+  .nav-item .badge { margin-left: auto; background: #7b68ee; color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 10px; font-weight: 600; }
+  .nav-indent { padding-left: 20px; }
+  .nav-indent-2 { padding-left: 36px; }
+
+  /* Main */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { display: flex; align-items: center; padding: 12px 24px; border-bottom: 1px solid #2a2a4a; background: #16213e; gap: 12px; flex-wrap: wrap; }
+  .topbar .breadcrumb { font-size: 13px; color: #888; }
+  .topbar .breadcrumb span { color: #ccc; }
+
+  /* Channel filter bar */
+  .filter-bar { display: flex; align-items: center; gap: 8px; padding: 10px 24px; background: #0f172a; border-bottom: 1px solid #2a2a4a; font-size: 13px; }
+  .filter-bar .filter-label { color: #666; font-weight: 600; }
+  .filter-chip { padding: 4px 12px; border-radius: 16px; cursor: pointer; border: 1px solid #333; color: #888; transition: all 0.15s; font-size: 12px; }
+  .filter-chip:hover { border-color: #7b68ee; color: #ccc; }
+  .filter-chip.active { border-color: transparent; color: #fff; font-weight: 600; }
+  .filter-chip.ch-all.active { background: #7b68ee44; color: #7b68ee; }
+  .filter-chip.ch-instantly.active { background: #f9731633; color: #f97316; }
+  .filter-chip.ch-heyreach.active { background: #0ea5e933; color: #0ea5e9; }
+  .filter-chip.ch-lirecruiter.active { background: #0a66c233; color: #0a66c2; }
+  .filter-chip.ch-inbound.active { background: #22c55e33; color: #22c55e; }
+  .dedup-indicator { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #22c55e; font-size: 12px; font-weight: 600; }
+  .dedup-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Tabs */
+  .content-tabs { display: flex; border-bottom: 1px solid #2a2a4a; background: #16213e; overflow-x: auto; }
+  .content-tab { padding: 14px 20px; font-size: 13px; color: #888; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; white-space: nowrap; }
+  .content-tab:hover { color: #ccc; }
+  .content-tab.active { color: #7b68ee; border-bottom-color: #7b68ee; font-weight: 600; }
+  .tab-content { display: none; flex: 1; overflow-y: auto; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* Board */
+  .board { display: flex; gap: 12px; padding: 20px; overflow-x: auto; flex: 1; }
+  .phase-divider { display: flex; align-items: center; padding: 0 4px; }
+  .phase-divider .divider-line { width: 2px; height: 80%; background: linear-gradient(to bottom, transparent, #7b68ee44, transparent); }
+  .phase-divider .divider-label { writing-mode: vertical-rl; text-orientation: mixed; font-size: 11px; color: #7b68ee; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+
+  .column { min-width: 240px; max-width: 240px; background: #16213e; border-radius: 10px; display: flex; flex-direction: column; }
+  .column-header { padding: 12px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #2a2a4a; }
+  .column-header .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .column-header .title { font-weight: 600; font-size: 13px; }
+  .column-header .count { color: #666; font-size: 12px; margin-left: auto; }
+  .column-body { padding: 6px; flex: 1; overflow-y: auto; }
+
+  .card { background: #1e2d50; border: 1px solid #2a2a4a; border-radius: 8px; padding: 12px; margin-bottom: 6px; cursor: pointer; transition: all 0.15s; }
+  .card:hover { border-color: #7b68ee; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .card .card-title { font-weight: 600; font-size: 13px; color: #fff; margin-bottom: 6px; }
+  .card .card-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .card .tag { font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+  .tag-instantly { background: #f9731622; color: #f97316; }
+  .tag-heyreach { background: #0ea5e922; color: #0ea5e9; }
+  .tag-lirecruiter { background: #0a66c222; color: #0a66c2; }
+  .tag-inbound { background: #22c55e22; color: #22c55e; }
+  .tag-linkedin { background: #0077b522; color: #0a66c2; }
+  .tag-resume { background: #22c55e22; color: #22c55e; }
+  .tag-notes { background: #f59e0b22; color: #f59e0b; }
+  .card .card-fields { font-size: 11px; color: #666; display: flex; flex-direction: column; gap: 2px; }
+  .card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .card .card-avatar { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+
+  .empty-hint { color: #444; font-style: italic; padding: 16px 8px; text-align: center; font-size: 12px; }
+
+  /* Detail panel */
+  .detail-overlay { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; background: #16213e; border-left: 1px solid #2a2a4a; z-index: 100; transform: translateX(100%); transition: transform 0.25s ease; box-shadow: -8px 0 30px rgba(0,0,0,0.5); overflow-y: auto; }
+  .detail-overlay.open { transform: translateX(0); }
+  .detail-header { padding: 20px 24px; border-bottom: 1px solid #2a2a4a; display: flex; align-items: center; }
+  .detail-header h2 { font-size: 20px; color: #fff; flex: 1; }
+  .close-btn { background: none; border: none; color: #888; font-size: 24px; cursor: pointer; padding: 4px 8px; }
+  .close-btn:hover { color: #fff; }
+  .detail-section { padding: 16px 24px; border-bottom: 1px solid #2a2a4a; }
+  .detail-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 10px; }
+  .detail-field { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 14px; }
+  .detail-field .label { color: #888; }
+  .detail-field .value { color: #fff; }
+  .detail-field .value a { color: #7b68ee; text-decoration: none; }
+  .status-badge { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; display: inline-block; }
+  .channel-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .channel-badge { padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .note-card { background: #1e2d50; border-radius: 8px; padding: 16px; margin-bottom: 12px; border-left: 3px solid #7b68ee; }
+  .note-card .note-header { font-size: 12px; color: #888; margin-bottom: 6px; }
+  .note-card .note-body { font-size: 14px; color: #ddd; line-height: 1.6; }
+
+  /* Hierarchy */
+  .hierarchy { padding: 24px; }
+  .tree-node { display: flex; align-items: center; padding: 10px 16px; margin: 4px 0; border-radius: 8px; font-size: 14px; gap: 10px; }
+  .tree-node.space { background: #7b68ee22; border: 1px solid #7b68ee44; color: #7b68ee; font-weight: 700; font-size: 16px; }
+  .tree-node.folder { background: #f59e0b15; border: 1px solid #f59e0b33; color: #f59e0b; margin-left: 32px; font-weight: 600; }
+  .tree-node.list { background: #22c55e15; border: 1px solid #22c55e33; color: #22c55e; margin-left: 64px; }
+  .tree-node.task { background: #3b82f615; border: 1px solid #3b82f633; color: #3b82f6; margin-left: 96px; font-size: 13px; }
+  .tree-connector { border-left: 2px dashed #333; margin-left: 20px; height: 8px; }
+  .tree-connector.l2 { margin-left: 52px; }
+  .tree-connector.l3 { margin-left: 84px; }
+  .node-icon { font-size: 18px; }
+  .node-label { flex: 1; }
+  .node-type { font-size: 11px; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Schema */
+  .schema-panel { background: #0f172a; border: 1px solid #2a2a4a; border-radius: 12px; margin: 24px; padding: 24px; }
+  .schema-panel h3 { color: #7b68ee; font-size: 16px; margin-bottom: 16px; }
+  .schema-table { width: 100%; border-collapse: collapse; }
+  .schema-table th { text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #666; border-bottom: 1px solid #2a2a4a; }
+  .schema-table td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e2d50; }
+  .field-type { color: #7b68ee; font-family: monospace; font-size: 12px; background: #7b68ee15; padding: 2px 8px; border-radius: 4px; }
+
+  /* Status flow */
+  .flow-section { padding: 24px; }
+  .flow-phase { margin-bottom: 32px; }
+  .flow-phase-title { font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; font-weight: 700; }
+  .status-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .status-pill { padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .status-arrow { color: #444; font-size: 16px; }
+
+  /* Automation */
+  .auto-section { padding: 24px; }
+  .auto-step { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 8px; }
+  .auto-step-num { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0; }
+  .auto-step-content { flex: 1; }
+  .auto-step-content .step-title { font-weight: 600; color: #fff; margin-bottom: 4px; font-size: 14px; }
+  .auto-step-content .step-desc { font-size: 13px; color: #888; line-height: 1.5; }
+  .auto-connector { width: 32px; display: flex; justify-content: center; margin-bottom: 8px; }
+  .auto-connector .line { width: 2px; height: 16px; }
+
+  /* Dedup section */
+  .dedup-section { padding: 24px; }
+  .dedup-card { background: #0f172a; border: 1px solid #2a2a4a; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .dedup-card h3 { color: #fff; font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .dedup-scenario { background: #1e2d50; border-radius: 8px; padding: 16px; margin-bottom: 10px; border-left: 3px solid; }
+  .dedup-scenario .scenario-title { font-weight: 600; color: #fff; font-size: 14px; margin-bottom: 6px; }
+  .dedup-scenario .scenario-desc { font-size: 13px; color: #999; line-height: 1.5; }
+
+  /* LI Recruiter solution */
+  .solution-card { background: #0f172a; border: 2px solid #0a66c244; border-radius: 12px; padding: 24px; margin: 16px 0; }
+  .solution-card h3 { color: #0a66c2; font-size: 16px; margin-bottom: 4px; }
+  .solution-card .subtitle { color: #666; font-size: 13px; margin-bottom: 16px; }
+  .solution-option { background: #1e2d50; border-radius: 8px; padding: 16px; margin-bottom: 10px; display: flex; gap: 12px; align-items: flex-start; }
+  .solution-option .opt-num { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+  .solution-option .opt-content { flex: 1; }
+  .solution-option .opt-title { font-weight: 600; color: #fff; font-size: 14px; margin-bottom: 4px; }
+  .solution-option .opt-desc { font-size: 13px; color: #888; line-height: 1.5; }
+  .recommended-tag { background: #22c55e33; color: #22c55e; font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700; margin-left: 8px; }
+
+  /* Command examples */
+  .cmd-box { background: #1e2d50; border-radius: 10px; padding: 20px; margin-top: 20px; }
+  .cmd-box h3 { color: #fff; font-size: 15px; margin-bottom: 12px; }
+  .cmd-example { font-size: 14px; color: #ccc; line-height: 2.2; padding-left: 4px; }
+  .cmd-example em { color: #7b68ee; }
+  .cmd-channel { font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Workspace</h2>
+      <div class="workspace">RecruitCloud</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-title">Spaces</div>
+      <div class="nav-item active">
+        <span class="node-icon" style="font-size:14px">🟣</span> SmartState
+      </div>
+      <div class="nav-item nav-indent active" style="color:#f59e0b; font-weight:600">
+        <span style="font-size:14px">📁</span> Sr. Software Engineer <span class="badge">7</span>
+      </div>
+      <div class="nav-item nav-indent-2 active">
+        <span style="font-size:14px">📋</span> Candidates
+      </div>
+      <div class="nav-item nav-indent" style="color:#f59e0b">
+        <span style="font-size:14px">📁</span> Marketing Manager <span class="badge">3</span>
+      </div>
+      <div class="nav-item nav-indent-2">
+        <span style="font-size:14px">📋</span> Candidates
+      </div>
+      <div class="nav-item nav-indent" style="color:#f59e0b">
+        <span style="font-size:14px">📁</span> Data Analyst <span class="badge">0</span>
+      </div>
+      <div class="nav-item nav-indent" style="color:#555; font-style:italic; font-size:13px">
+        <span>＋</span> Add Job Folder...
+      </div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="breadcrumb">SmartState / <span>Sr. Software Engineer</span> / <span>Candidates</span></div>
+    </div>
+
+    <!-- Channel filter bar -->
+    <div class="filter-bar">
+      <span class="filter-label">Channel:</span>
+      <span class="filter-chip ch-all active" onclick="filterChannel(this,'all')">All</span>
+      <span class="filter-chip ch-instantly" onclick="filterChannel(this,'instantly')">Instantly</span>
+      <span class="filter-chip ch-heyreach" onclick="filterChannel(this,'heyreach')">Heyreach</span>
+      <span class="filter-chip ch-lirecruiter" onclick="filterChannel(this,'lirecruiter')">LI Recruiter</span>
+      <span class="filter-chip ch-inbound" onclick="filterChannel(this,'inbound')">Inbound</span>
+      <div class="dedup-indicator">
+        <span class="dedup-dot"></span> Dedup Active — 0 conflicts
+      </div>
+    </div>
+
+    <div class="content-tabs">
+      <div class="content-tab active" onclick="switchTab('pipeline')">Pipeline Board</div>
+      <div class="content-tab" onclick="switchTab('structure')">Hierarchy</div>
+      <div class="content-tab" onclick="switchTab('fields')">Custom Fields</div>
+      <div class="content-tab" onclick="switchTab('statuses')">Status Flow</div>
+      <div class="content-tab" onclick="switchTab('channels')">Multi-Channel Flow</div>
+      <div class="content-tab" onclick="switchTab('dedup')">Dedup Logic</div>
+      <div class="content-tab" onclick="switchTab('lirecruiter')">LI Recruiter Fix</div>
+    </div>
+
+    <!-- Tab: Pipeline Board -->
+    <div class="tab-content active" id="tab-pipeline">
+      <div class="board">
+        <!-- OUTREACH PHASE -->
+        <div class="column">
+          <div class="column-header">
+            <div class="status-dot" style="background:#8b5cf6"></div>
+            <div class="title">Outreach Sent</div>
+            <div class="count">3</div>
+          </div>
+          <div class="column-body">
+            <div class="card" onclick="openDetail('tom')">
+              <div class="card-top">
+                <div class="card-avatar" style="background:#f97316">TL</div>
+                <div class="card-title">Tom Liu</div>
+              </div>
+              <div class="card-meta">
+                <span class="tag tag-instantly">Instantly</span>
+                <span class="tag tag-linkedin">in LinkedIn</span>
+              </div>
+              <div class="card-fields"><span>Emailed Mar 7 · Campaign: SmartState-SWE-Q1</span></div>
+            </div>
+            <div class="card" onclick="openDetail('nina')">
+              <div class="card-top">
+                <div class="card-avatar" style="background:#0ea5e9">NP</div>
+                <div class="card-title">Nina Patel</div>
+              </div>
+              <div class="card-meta">
+                <span class="tag tag-heyreach">Heyreach</span>
+                <span class="tag tag-linkedin">in LinkedIn</span>
+              </div>
+              <div class="card-fields"><span>LI msg Mar 6 · Seq: SWE-outreach-v2</span></div>
+            </div>
+            <div class="card" onclick="openDetail('james')">
+              <div class="card-top">
+                <div class="card-avatar" style="background:#0a66c2">JW</div>
+                <div class="card-title">James Wright</div>
+              </div>
+              <div class="card-meta">
+                <span class="tag tag-lirecruiter">LI Recruiter</span>
+              </div>
+              <div class="card-fields"><span>InMail Mar 7 · Logged via Claude</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Replied -->
+        <div class="column">
+          <div class="column-header">
+            <div class="status-dot" style="background:#a855f7"></div>
+            <div class="title">Replied</div>
+            <div class="count">1</div>
+          </div>
+          <div class="column-body">
+            <div class="card" onclick="openDetail('priya')">
+              <div class="card-top">
+                <div class="card-avatar" style="background:#f97316">PK</div>
+                <div class="card-title">Priya Kumar</div>
+              </div>
+              <div class="card-meta">
+                <span class="tag tag-instantly">Instantly</span>
+                <span class="tag tag-linkedin">in LinkedIn</span>
+              </div>
+              <div class="card-fields"><span>Replied Mar 7 · Interested, wants to chat</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PHASE DIVIDER -->
+        <div class="phase-divider">
+          <div class="divider-label">RECRUITMENT</div>
+        </div>
+
+        <!-- Screening -->
+        <div class="column">
+          <div class="column-header">
+            <div class="status-dot" style="background:#3b82f6"></div>
+            <div class="title">Screening</div>
+            <div class="count">1</div>
+          </div>
+          <div class="column-body">
+            <div class="card" onclick="openDetail('marcus')">
+              <div class="card-top">
+                <div class="card-avatar" style="background:#0ea5e9">MJ</div>
+                <div class="card-title">Marcus Johnson</div>
+              </div>
+              <div class="card-meta">
+                <span class="tag tag-heyreach">Heyreach</span>
+                <span class="tag tag-resume">Resume</span>
+                <span class="tag tag-linkedin">in LinkedIn</span>
+              </div>
+              <div class="card-fields"><span>Call scheduled Mar 10</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interviewed -->
+        <div class="column">
+          <div class="column-header">
+            <div class="status-dot" style="background:#f59e0b"></div>
+            <div class="title">Interviewed</div>
+            <div class="count">1</div>
+          </div>
+          <div class="column-body">
+            <div class="card" onclick="openDetail('sarah')">
+              <div class="card-top">
+                <div class="card-avatar" style="background:#f97316">SC</div>
+                <div class="card-title">Sarah Chen</div>
+              </div>
+              <div class="card-meta">
+                <span class="tag tag-instantly">Instantly</span>
+                <span class="tag tag-resume">Resume</span>
+                <span class="tag tag-notes">Notes</span>
+              </div>
+              <div class="card-fields"><span>Interviewed Mar 6 · Strong candidate</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Submitted -->
+        <div class="column">
+          <div class="column-header">
+            <div class="status-dot" style="background:#22c55e"></div>
+            <div class="title">Submitted to Client</div>
+            <div class="count">1</div>
+          </div>
+          <div class="column-body">
+            <div class="card" onclick="openDetail('alex')">
+              <div class="card-top">
+                <div class="card-avatar" style="background:#0a66c2">AR</div>
+                <div class="card-title">Alex Rivera</div>
+              </div>
+              <div class="card-meta">
+                <span class="tag tag-lirecruiter">LI Recruiter</span>
+                <span class="tag tag-resume">Resume</span>
+                <span class="tag tag-notes">Notes</span>
+              </div>
+              <div class="card-fields"><span>Submitted Mar 5 · Awaiting feedback</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Client Review -->
+        <div class="column">
+          <div class="column-header">
+            <div class="status-dot" style="background:#06b6d4"></div>
+            <div class="title">Client Review</div>
+            <div class="count">0</div>
+          </div>
+          <div class="column-body"><div class="empty-hint">Awaiting SmartState feedback</div></div>
+        </div>
+
+        <!-- Not Interested -->
+        <div class="column" style="opacity:0.7">
+          <div class="column-header">
+            <div class="status-dot" style="background:#94a3b8"></div>
+            <div class="title">Not Interested</div>
+            <div class="count">0</div>
+          </div>
+          <div class="column-body"><div class="empty-hint">Replied but declined</div></div>
+        </div>
+
+        <!-- Rejected -->
+        <div class="column" style="opacity:0.7">
+          <div class="column-header">
+            <div class="status-dot" style="background:#ef4444"></div>
+            <div class="title">Rejected</div>
+            <div class="count">0</div>
+          </div>
+          <div class="column-body"><div class="empty-hint">Rejected by you or client</div></div>
+        </div>
+
+        <!-- Hired -->
+        <div class="column">
+          <div class="column-header">
+            <div class="status-dot" style="background:#10b981"></div>
+            <div class="title">Hired</div>
+            <div class="count">0</div>
+          </div>
+          <div class="column-body"><div class="empty-hint">Placements</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Hierarchy -->
+    <div class="tab-content" id="tab-structure">
+      <div class="hierarchy">
+        <h2 style="color:#fff; margin-bottom:8px">ClickUp Hierarchy</h2>
+        <p style="color:#888; margin-bottom:20px; font-size:14px;">Every lead from every channel gets a task here. ClickUp is your single source of truth and dedup hub.</p>
+        <div class="tree">
+          <div class="tree-node space"><span class="node-icon">🟣</span><span class="node-label">SmartState</span><span class="node-type">Space</span></div>
+          <div class="tree-connector"></div>
+          <div class="tree-node folder"><span class="node-icon">📁</span><span class="node-label">Sr. Software Engineer</span><span class="node-type">Folder (Job)</span></div>
+          <div class="tree-connector l2"></div>
+          <div class="tree-node list"><span class="node-icon">📋</span><span class="node-label">Candidates</span><span class="node-type">List</span></div>
+          <div class="tree-connector l3"></div>
+          <div class="tree-node task"><span class="node-icon">👤</span><span class="node-label">Sarah Chen <span class="tag tag-instantly" style="font-size:10px; vertical-align:middle">Instantly</span></span><span class="node-type">Task</span></div>
+          <div class="tree-connector l3"></div>
+          <div class="tree-node task"><span class="node-icon">👤</span><span class="node-label">Alex Rivera <span class="tag tag-lirecruiter" style="font-size:10px; vertical-align:middle">LI Recruiter</span></span><span class="node-type">Task</span></div>
+          <div class="tree-connector l3"></div>
+          <div class="tree-node task"><span class="node-icon">👤</span><span class="node-label">Nina Patel <span class="tag tag-heyreach" style="font-size:10px; vertical-align:middle">Heyreach</span></span><span class="node-type">Task</span></div>
+          <div class="tree-connector"></div>
+          <div class="tree-node folder"><span class="node-icon">📁</span><span class="node-label">Marketing Manager</span><span class="node-type">Folder (Job)</span></div>
+          <div class="tree-connector l2"></div>
+          <div class="tree-node list"><span class="node-icon">📋</span><span class="node-label">Candidates</span><span class="node-type">List</span></div>
+          <div class="tree-connector"></div>
+          <div class="tree-node folder" style="opacity:0.4; border-style:dashed"><span class="node-icon">＋</span><span class="node-label">Future Roles...</span><span class="node-type">Folder</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Custom Fields -->
+    <div class="tab-content" id="tab-fields">
+      <div class="schema-panel">
+        <h3>Custom Fields (per Candidate Task)</h3>
+        <p style="color:#888; margin-bottom:16px; font-size:13px;">Set at Space level so every job inherits them. Channel field is critical for dedup.</p>
+        <table class="schema-table">
+          <thead><tr><th>Field</th><th>Type</th><th>Example</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td style="color:#f97316; font-weight:600">Outreach Channel</td><td><span class="field-type">Dropdown</span></td><td>Instantly / Heyreach / LI Recruiter / Inbound</td><td style="color:#f97316">CRITICAL for dedup &amp; tracking</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Campaign / Sequence</td><td><span class="field-type">Short Text</span></td><td>SmartState-SWE-Q1</td><td style="color:#666">Instantly campaign or Heyreach sequence name</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Date Contacted</td><td><span class="field-type">Date</span></td><td>Mar 4, 2026</td><td style="color:#666">When first outreach was sent</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Date Replied</td><td><span class="field-type">Date</span></td><td>Mar 7, 2026</td><td style="color:#666">When they responded (if ever)</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Email</td><td><span class="field-type">Email</span></td><td>sarah@email.com</td><td style="color:#666">From Instantly lead data</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Phone</td><td><span class="field-type">Phone</span></td><td>(555) 123-4567</td><td style="color:#666">Optional</td></tr>
+            <tr><td style="color:#fff; font-weight:600">LinkedIn Profile</td><td><span class="field-type">URL</span></td><td>linkedin.com/in/sarahchen</td><td style="color:#666">From lead data — also used for dedup matching</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Resume</td><td><span class="field-type">Attachment</span></td><td>resume.pdf</td><td style="color:#666">Auto-attached from email scan</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Interview Notes</td><td><span class="field-type">Long Text</span></td><td>Strong React skills...</td><td style="color:#666">Gemini notes pushed via Claude</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Rating</td><td><span class="field-type">Rating (1-5)</span></td><td>4/5</td><td style="color:#666">Your assessment</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Interview Date</td><td><span class="field-type">Date</span></td><td>Mar 6, 2026</td><td style="color:#666">Google Meet date</td></tr>
+            <tr><td style="color:#fff; font-weight:600">Salary Expectation</td><td><span class="field-type">Currency</span></td><td>$130,000</td><td style="color:#666">From interview</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: Status Flow -->
+    <div class="tab-content" id="tab-statuses">
+      <div class="flow-section">
+        <h2 style="color:#fff; margin-bottom:20px">Full Pipeline: Outreach → Recruitment</h2>
+
+        <div class="flow-phase">
+          <div class="flow-phase-title" style="color:#8b5cf6">Phase 1: Outreach</div>
+          <div class="status-flow">
+            <span class="status-pill" style="background:#8b5cf633; color:#8b5cf6">Outreach Sent</span>
+            <span class="status-arrow">→</span>
+            <span class="status-pill" style="background:#a855f733; color:#a855f7">Replied</span>
+          </div>
+          <div style="margin-top:6px; padding-left:4px;">
+            <span class="status-pill" style="background:#94a3b833; color:#94a3b8; font-size:12px">Not Interested</span>
+            <span style="color:#555; font-size:12px; margin-left:8px">← They replied but said no</span>
+          </div>
+        </div>
+
+        <div class="flow-phase">
+          <div class="flow-phase-title" style="color:#3b82f6">Phase 2: Recruitment</div>
+          <div class="status-flow">
+            <span class="status-pill" style="background:#3b82f633; color:#3b82f6">Screening</span>
+            <span class="status-arrow">→</span>
+            <span class="status-pill" style="background:#f59e0b33; color:#f59e0b">Interviewed</span>
+            <span class="status-arrow">→</span>
+            <span class="status-pill" style="background:#22c55e33; color:#22c55e">Submitted to Client</span>
+            <span class="status-arrow">→</span>
+            <span class="status-pill" style="background:#06b6d433; color:#06b6d4">Client Review</span>
+            <span class="status-arrow">→</span>
+            <span class="status-pill" style="background:#10b98133; color:#10b981">Hired</span>
+          </div>
+          <div style="margin-top:6px; padding-left:4px;">
+            <span class="status-pill" style="background:#ef444433; color:#ef4444; font-size:12px">Rejected</span>
+            <span style="color:#555; font-size:12px; margin-left:8px">← Can happen at any recruitment stage</span>
+          </div>
+        </div>
+
+        <div class="cmd-box">
+          <h3>How you'll talk to me:</h3>
+          <div class="cmd-example">
+            "<em>Add Tom Liu to Sr. Software Engineer, contacted via Instantly, campaign SmartState-SWE-Q1</em>"<br>
+            "<em>Priya Kumar replied — move to Replied</em>"<br>
+            "<em>Move Priya to Screening, schedule call for March 10</em>"<br>
+            "<em>Update Sarah Chen — notes: [Gemini notes], move to Interviewed</em>"<br>
+            "<em>Submit Alex Rivera to client</em>"<br>
+            "<em>I just InMailed these 5 people on LI Recruiter: [paste names/URLs]</em>"<br>
+            "<em>Check if nina.patel@email.com is already in ClickUp before I add her to Instantly</em>"
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Multi-Channel Flow -->
+    <div class="tab-content" id="tab-channels">
+      <div class="auto-section">
+        <h2 style="color:#fff; margin-bottom:8px">Multi-Channel Outreach Flow</h2>
+        <p style="color:#888; margin-bottom:24px; font-size:14px">Three outreach channels feed into one ClickUp pipeline. Every contact is logged to prevent duplicates.</p>
+
+        <!-- Channel 1: Instantly -->
+        <div style="background:#f9731611; border:1px solid #f9731633; border-radius:12px; padding:20px; margin-bottom:16px">
+          <h3 style="color:#f97316; font-size:15px; margin-bottom:12px">Channel 1: Instantly (Email Campaigns)</h3>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#f97316">1</div>
+            <div class="auto-step-content">
+              <div class="step-title">Load leads into Instantly with full data</div>
+              <div class="step-desc">Push leads with name, email, LinkedIn, phone into Instantly campaign. All this data gets captured.</div>
+            </div>
+          </div>
+          <div class="auto-connector"><div class="line" style="background:#f9731644"></div></div>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#f97316">2</div>
+            <div class="auto-step-content">
+              <div class="step-title">Campaign launches → Claude creates ClickUp tasks</div>
+              <div class="step-desc">When campaign sends, each lead gets a task in ClickUp with status "Outreach Sent", channel "Instantly", and campaign name. Pushed via MCP.</div>
+            </div>
+          </div>
+          <div class="auto-connector"><div class="line" style="background:#f9731644"></div></div>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#f97316">3</div>
+            <div class="auto-step-content">
+              <div class="step-title">Reply detected → Update task to "Replied"</div>
+              <div class="step-desc">Instantly webhook or you tell Claude → task moves to "Replied" with date. Resume scanning kicks in if they send one.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Channel 2: Heyreach -->
+        <div style="background:#0ea5e911; border:1px solid #0ea5e933; border-radius:12px; padding:20px; margin-bottom:16px">
+          <h3 style="color:#0ea5e9; font-size:15px; margin-bottom:12px">Channel 2: Heyreach (LinkedIn Outreach)</h3>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#0ea5e9">1</div>
+            <div class="auto-step-content">
+              <div class="step-title">Heyreach sequence launches</div>
+              <div class="step-desc">LinkedIn connection requests / messages go out via Heyreach automation.</div>
+            </div>
+          </div>
+          <div class="auto-connector"><div class="line" style="background:#0ea5e944"></div></div>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#0ea5e9">2</div>
+            <div class="auto-step-content">
+              <div class="step-title">Heyreach API → ClickUp task created</div>
+              <div class="step-desc">Connect Heyreach API to ClickUp. Each contacted lead becomes a task with channel "Heyreach" and sequence name.</div>
+            </div>
+          </div>
+          <div class="auto-connector"><div class="line" style="background:#0ea5e944"></div></div>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#0ea5e9">3</div>
+            <div class="auto-step-content">
+              <div class="step-title">LinkedIn reply → Task updated to "Replied"</div>
+              <div class="step-desc">Heyreach detects reply → webhook or you tell Claude → task moves to "Replied".</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Channel 3: LinkedIn Recruiter -->
+        <div style="background:#0a66c211; border:1px solid #0a66c233; border-radius:12px; padding:20px; margin-bottom:16px">
+          <h3 style="color:#0a66c2; font-size:15px; margin-bottom:12px">Channel 3: LinkedIn Recruiter (Manual InMails) <span style="background:#ef444433; color:#ef4444; font-size:11px; padding:2px 8px; border-radius:4px; margin-left:8px">NO API</span></h3>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#0a66c2">1</div>
+            <div class="auto-step-content">
+              <div class="step-title">You send InMails via LinkedIn Recruiter</div>
+              <div class="step-desc">Manual outreach to passive candidates. No API to auto-sync.</div>
+            </div>
+          </div>
+          <div class="auto-connector"><div class="line" style="background:#0a66c244"></div></div>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#0a66c2">2</div>
+            <div class="auto-step-content">
+              <div class="step-title">Log contacts via Claude (batch or one-by-one)</div>
+              <div class="step-desc">After your session: tell Claude the names + LinkedIn URLs. Claude creates tasks in ClickUp with channel "LI Recruiter". See "LI Recruiter Fix" tab for details.</div>
+            </div>
+          </div>
+          <div class="auto-connector"><div class="line" style="background:#0a66c244"></div></div>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#0a66c2">3</div>
+            <div class="auto-step-content">
+              <div class="step-title">Reply? Tell Claude → update to "Replied"</div>
+              <div class="step-desc">When someone replies to your InMail, tell Claude to update their status.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inbound -->
+        <div style="background:#22c55e11; border:1px solid #22c55e33; border-radius:12px; padding:20px">
+          <h3 style="color:#22c55e; font-size:15px; margin-bottom:12px">Channel 4: Inbound (Email Replies with Resume)</h3>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#22c55e">1</div>
+            <div class="auto-step-content">
+              <div class="step-title">Candidate sends resume via email</div>
+              <div class="step-desc">Email automation scans for resume attachment, extracts name + email.</div>
+            </div>
+          </div>
+          <div class="auto-connector"><div class="line" style="background:#22c55e44"></div></div>
+          <div class="auto-step">
+            <div class="auto-step-num" style="background:#22c55e">2</div>
+            <div class="auto-step-content">
+              <div class="step-title">Resume attached to existing task (or new task created)</div>
+              <div class="step-desc">If the person already has a task (from Instantly/Heyreach/LI Recruiter), the resume is attached to it. Otherwise a new "Inbound" task is created.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Dedup Logic -->
+    <div class="tab-content" id="tab-dedup">
+      <div class="dedup-section">
+        <h2 style="color:#fff; margin-bottom:8px">Deduplication Logic</h2>
+        <p style="color:#888; margin-bottom:24px; font-size:14px">ClickUp is the central dedup hub. Before ANY outreach, check if the person already exists.</p>
+
+        <div class="dedup-card">
+          <h3>How Dedup Works</h3>
+          <p style="color:#888; font-size:13px; margin-bottom:16px">Every candidate is matched by <strong style="color:#fff">LinkedIn URL</strong> (primary) or <strong style="color:#fff">email address</strong> (secondary). These are unique identifiers.</p>
+
+          <div class="dedup-scenario" style="border-color:#22c55e">
+            <div class="scenario-title" style="color:#22c55e">Scenario 1: Pre-Campaign Check</div>
+            <div class="scenario-desc">Before loading leads into Instantly or Heyreach, tell Claude: "Check if these people are already in ClickUp for Sr. Software Engineer: [paste list]." Claude searches by LinkedIn URL and email, flags duplicates, and tells you who's safe to add.</div>
+          </div>
+
+          <div class="dedup-scenario" style="border-color:#f97316">
+            <div class="scenario-title" style="color:#f97316">Scenario 2: Cross-Channel Conflict</div>
+            <div class="scenario-desc">You're about to InMail someone on LinkedIn Recruiter. Ask Claude: "Is sarah.chen@email.com already being contacted?" Claude checks all channels and tells you: "Yes — she's in Instantly campaign SmartState-SWE-Q1, emailed Mar 4. Status: Outreach Sent."</div>
+          </div>
+
+          <div class="dedup-scenario" style="border-color:#0ea5e9">
+            <div class="scenario-title" style="color:#0ea5e9">Scenario 3: Same Person, Different Channel</div>
+            <div class="scenario-desc">Someone already contacted via Heyreach applies inbound via email. Instead of creating a duplicate, the resume attachment gets added to their existing task, and you're notified.</div>
+          </div>
+
+          <div class="dedup-scenario" style="border-color:#ef4444">
+            <div class="scenario-title" style="color:#ef4444">Scenario 4: Bulk Dedup Before Campaign Launch</div>
+            <div class="scenario-desc">You're loading 150 leads into Instantly. Export your ClickUp candidate list first. Claude cross-references and removes anyone already contacted via Heyreach or LI Recruiter from your Instantly upload.</div>
+          </div>
+        </div>
+
+        <div class="cmd-box">
+          <h3>Dedup Commands:</h3>
+          <div class="cmd-example">
+            "<em>Is linkedin.com/in/sarahchen already in any SmartState job?</em>"<br>
+            "<em>Check these 20 LinkedIn URLs against ClickUp before I load them into Instantly</em>"<br>
+            "<em>Show me all candidates contacted through multiple channels</em>"<br>
+            "<em>Export everyone in Sr. Software Engineer so I can dedup against my Heyreach list</em>"
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: LI Recruiter Fix -->
+    <div class="tab-content" id="tab-lirecruiter">
+      <div style="padding:24px">
+        <h2 style="color:#fff; margin-bottom:8px">LinkedIn Recruiter Solution</h2>
+        <p style="color:#888; margin-bottom:24px; font-size:14px">LinkedIn Recruiter has no API. Here are three ways to keep ClickUp in sync — I recommend using them together.</p>
+
+        <div class="solution-card">
+          <h3>Recommended Approach: Three-Layer Solution</h3>
+          <div class="subtitle">Each layer handles a different moment in your workflow</div>
+
+          <div class="solution-option">
+            <div class="opt-num" style="background:#22c55e; color:#fff">1</div>
+            <div class="opt-content">
+              <div class="opt-title">Batch Log via Claude After Each Session <span class="recommended-tag">PRIMARY</span></div>
+              <div class="opt-desc">After an LI Recruiter session, paste the list of people you InMailed. Example: "I just InMailed these 5 people from LinkedIn Recruiter for Sr. Software Engineer:" then paste names + LinkedIn URLs. Claude bulk-creates all 5 tasks in ClickUp with channel "LI Recruiter" and today's date. Takes 30 seconds.</div>
+            </div>
+          </div>
+
+          <div class="solution-option">
+            <div class="opt-num" style="background:#3b82f6; color:#fff">2</div>
+            <div class="opt-content">
+              <div class="opt-title">Pre-Outreach Dedup Check <span class="recommended-tag">ALWAYS DO THIS</span></div>
+              <div class="opt-desc">Before sending any InMail, tell Claude: "I'm about to InMail these people — check if any are already in ClickUp." Claude searches by LinkedIn URL across ALL channels and flags conflicts. This prevents double-contacting someone already in an Instantly or Heyreach sequence.</div>
+            </div>
+          </div>
+
+          <div class="solution-option">
+            <div class="opt-num" style="background:#8b5cf6; color:#fff">3</div>
+            <div class="opt-content">
+              <div class="opt-title">Weekly Sync via LinkedIn Recruiter Export</div>
+              <div class="opt-desc">LinkedIn Recruiter lets you export project/pipeline lists as CSV. Once a week, export your "Sent InMails" list. Give it to Claude and say "Sync this with ClickUp — flag anyone missing." Claude creates any tasks that weren't logged in real-time.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cmd-box">
+          <h3>Example Workflow — Start to Finish:</h3>
+          <div class="cmd-example" style="line-height:2.5">
+            <strong style="color:#666">Before InMailing:</strong><br>
+            "<em>I'm about to InMail these 8 people on LI Recruiter for Sr. Software Engineer — check for duplicates:</em>"<br>
+            <span style="color:#888; font-size:12px; padding-left:16px">[paste LinkedIn URLs]</span><br>
+            <span style="color:#22c55e; font-size:13px; padding-left:16px">→ Claude: "6 are clear. 2 conflicts: Tom Liu is already in Instantly campaign, Nina Patel is in Heyreach sequence."</span><br><br>
+
+            <strong style="color:#666">After InMailing (6 people):</strong><br>
+            "<em>Done. I InMailed these 6 on LI Recruiter for Sr. Software Engineer:</em>"<br>
+            <span style="color:#888; font-size:12px; padding-left:16px">[paste names + LinkedIn URLs]</span><br>
+            <span style="color:#22c55e; font-size:13px; padding-left:16px">→ Claude: "Created 6 tasks in ClickUp. All set — channel: LI Recruiter, date: today."</span><br><br>
+
+            <strong style="color:#666">When someone replies:</strong><br>
+            "<em>James Wright replied to my InMail — he's interested, wants to chat Tuesday</em>"<br>
+            <span style="color:#22c55e; font-size:13px; padding-left:16px">→ Claude: "Moved James Wright to Replied. Added note: interested, wants to chat Tuesday."</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Panel -->
+  <div class="detail-overlay" id="detailPanel">
+    <div class="detail-header">
+      <h2 id="detailName">—</h2>
+      <button class="close-btn" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="detail-section">
+      <h3>Status &amp; Channel</h3>
+      <div id="detailStatus" style="margin-bottom:8px"></div>
+      <div id="detailChannel" class="channel-badges"></div>
+    </div>
+    <div class="detail-section">
+      <h3>Contact Info</h3>
+      <div class="detail-field"><span class="label">Email</span><span class="value" id="detailEmail">—</span></div>
+      <div class="detail-field"><span class="label">Phone</span><span class="value" id="detailPhone">—</span></div>
+      <div class="detail-field"><span class="label">LinkedIn</span><span class="value"><a id="detailLinkedin" href="#">—</a></span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Outreach Details</h3>
+      <div class="detail-field"><span class="label">Channel</span><span class="value" id="detailOutreachChannel">—</span></div>
+      <div class="detail-field"><span class="label">Campaign</span><span class="value" id="detailCampaign">—</span></div>
+      <div class="detail-field"><span class="label">Date Contacted</span><span class="value" id="detailDateContacted">—</span></div>
+      <div class="detail-field"><span class="label">Date Replied</span><span class="value" id="detailDateReplied">—</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Recruitment Details</h3>
+      <div class="detail-field"><span class="label">Rating</span><span class="value" id="detailRating">—</span></div>
+      <div class="detail-field"><span class="label">Interview Date</span><span class="value" id="detailInterview">—</span></div>
+      <div class="detail-field"><span class="label">Salary Exp.</span><span class="value" id="detailSalary">—</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Resume</h3>
+      <div id="detailResume" style="padding:8px 0; color:#666">—</div>
+    </div>
+    <div class="detail-section">
+      <h3>Notes</h3>
+      <div id="detailNotes" style="padding:8px 0; color:#666">—</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const candidates = {
+  tom: {
+    name: 'Tom Liu', status: 'Outreach Sent', statusColor: '#8b5cf6',
+    channel: 'Instantly', channelColor: '#f97316', campaign: 'SmartState-SWE-Q1',
+    email: 'tom.liu@techcorp.io', phone: '—', linkedin: 'linkedin.com/in/tomliu',
+    dateContacted: 'Mar 7, 2026', dateReplied: '—',
+    rating: '—', interview: '—', salary: '—',
+    resume: null, notes: 'Sent initial email via Instantly campaign.'
+  },
+  nina: {
+    name: 'Nina Patel', status: 'Outreach Sent', statusColor: '#8b5cf6',
+    channel: 'Heyreach', channelColor: '#0ea5e9', campaign: 'SWE-outreach-v2',
+    email: 'nina.p@startup.com', phone: '—', linkedin: 'linkedin.com/in/ninapatel',
+    dateContacted: 'Mar 6, 2026', dateReplied: '—',
+    rating: '—', interview: '—', salary: '—',
+    resume: null, notes: 'LinkedIn connection request + message sent via Heyreach.'
+  },
+  james: {
+    name: 'James Wright', status: 'Outreach Sent', statusColor: '#8b5cf6',
+    channel: 'LI Recruiter', channelColor: '#0a66c2', campaign: '—',
+    email: '—', phone: '—', linkedin: 'linkedin.com/in/jameswright-dev',
+    dateContacted: 'Mar 7, 2026', dateReplied: '—',
+    rating: '—', interview: '—', salary: '—',
+    resume: null, notes: 'InMail sent. Logged via Claude batch upload.'
+  },
+  priya: {
+    name: 'Priya Kumar', status: 'Replied', statusColor: '#a855f7',
+    channel: 'Instantly', channelColor: '#f97316', campaign: 'SmartState-SWE-Q1',
+    email: 'priya.kumar@email.com', phone: '(555) 567-8901', linkedin: 'linkedin.com/in/priyakumar',
+    dateContacted: 'Mar 3, 2026', dateReplied: 'Mar 7, 2026',
+    rating: '—', interview: '—', salary: '—',
+    resume: null, notes: 'Replied interested. Wants to chat about the role. Schedule screening.'
+  },
+  marcus: {
+    name: 'Marcus Johnson', status: 'Screening', statusColor: '#3b82f6',
+    channel: 'Heyreach', channelColor: '#0ea5e9', campaign: 'SWE-outreach-v1',
+    email: 'marcus.j@email.com', phone: '(555) 456-7890', linkedin: 'linkedin.com/in/marcusjohnson',
+    dateContacted: 'Feb 28, 2026', dateReplied: 'Mar 2, 2026',
+    rating: '⭐⭐⭐', interview: 'Mar 10, 2026', salary: '$115,000',
+    resume: 'marcus_johnson_resume.pdf', notes: '3 years Python/Django. Interested in pivoting to React. Screening call scheduled.'
+  },
+  sarah: {
+    name: 'Sarah Chen', status: 'Interviewed', statusColor: '#f59e0b',
+    channel: 'Instantly', channelColor: '#f97316', campaign: 'SmartState-SWE-Q1',
+    email: 'sarah.chen@email.com', phone: '(555) 234-5678', linkedin: 'linkedin.com/in/sarahchen',
+    dateContacted: 'Feb 25, 2026', dateReplied: 'Feb 27, 2026',
+    rating: '⭐⭐⭐⭐', interview: 'Mar 6, 2026', salary: '$130,000',
+    resume: 'sarah_chen_resume.pdf',
+    notes: 'Strong React/TypeScript. 5 yrs exp. Led Vue→React migration. Great communicator. Salary $125-135k. Available in 2 weeks. Recommend submission.'
+  },
+  alex: {
+    name: 'Alex Rivera', status: 'Submitted to Client', statusColor: '#22c55e',
+    channel: 'LI Recruiter', channelColor: '#0a66c2', campaign: '—',
+    email: 'alex.rivera@email.com', phone: '(555) 345-6789', linkedin: 'linkedin.com/in/alexrivera',
+    dateContacted: 'Feb 20, 2026', dateReplied: 'Feb 22, 2026',
+    rating: '⭐⭐⭐⭐⭐', interview: 'Mar 4, 2026', salary: '$140,000',
+    resume: 'alex_rivera_resume.pdf',
+    notes: 'Exceptional full-stack. 8 yrs. FAANG background. Built real-time data pipelines. Deep IoT knowledge. Top candidate.'
+  }
+};
+
+function openDetail(id) {
+  const c = candidates[id];
+  if (!c) return;
+  document.getElementById('detailName').textContent = c.name;
+  document.getElementById('detailStatus').innerHTML = `<span class="status-badge" style="background:${c.statusColor}33; color:${c.statusColor}">${c.status}</span>`;
+  document.getElementById('detailChannel').innerHTML = `<span class="channel-badge" style="background:${c.channelColor}22; color:${c.channelColor}">${c.channel}</span>`;
+  document.getElementById('detailEmail').textContent = c.email;
+  document.getElementById('detailPhone').textContent = c.phone;
+  document.getElementById('detailLinkedin').textContent = c.linkedin;
+  document.getElementById('detailOutreachChannel').textContent = c.channel;
+  document.getElementById('detailCampaign').textContent = c.campaign;
+  document.getElementById('detailDateContacted').textContent = c.dateContacted;
+  document.getElementById('detailDateReplied').textContent = c.dateReplied;
+  document.getElementById('detailRating').textContent = c.rating;
+  document.getElementById('detailInterview').textContent = c.interview;
+  document.getElementById('detailSalary').textContent = c.salary;
+  document.getElementById('detailResume').innerHTML = c.resume ? `<div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px">📄</span><span style="color:#fff">${c.resume}</span></div>` : '<em>No resume yet</em>';
+  document.getElementById('detailNotes').innerHTML = c.notes ? `<div class="note-card"><div class="note-body">${c.notes}</div></div>` : '<em>No notes yet</em>';
+  document.getElementById('detailPanel').classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('open');
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.content-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+}
+
+function filterChannel(el, channel) {
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  // Visual only in mockup — in real ClickUp this would filter the board
+}
+</script>
+</body>
+</html>
