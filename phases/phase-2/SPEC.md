@@ -1,5 +1,8 @@
 # Phase 2: Claude as ClickUp Interface
 
+**Status: 🔲 NOT STARTED**
+**Dependencies: Phase 1 (complete)**
+
 ## Objective
 Establish Claude + ClickUp MCP as Isaac's primary interface for managing candidates. All data entry, status updates, and dedup checks go through Claude.
 
@@ -9,7 +12,7 @@ Establish Claude + ClickUp MCP as Isaac's primary interface for managing candida
 Isaac says: "Add [Name] to [Job], contacted via [Channel], campaign [Name]"
 Claude creates a task in the correct job's Candidates list with:
 - Task name = candidate name
-- Status = Outreach Sent
+- Status = outreach sent
 - Custom fields populated from provided info
 
 Minimum input: Name + Job
@@ -32,9 +35,9 @@ Claude extracts:
 - Job titles / companies (if visible)
 
 Claude then bulk-creates tasks in ClickUp for the specified job with:
-- Channel: LI Recruiter
+- Channel: LinkedIn Recruiter (option ID: 38839ea6-f705-4fc6-abe0-e18311be12ae)
 - Date Contacted: today
-- Status: Outreach Sent
+- Status: outreach sent
 
 ### 2.4 Dedup Checks
 Before any outreach, Isaac can ask Claude to check for existing candidates.
@@ -51,17 +54,23 @@ Before any outreach, Isaac can ask Claude to check for existing candidates.
 - Fuzzy: Name match flagged as "possible duplicate — verify"
 
 ### 2.5 Query Candidates
-Isaac says: "Show me all candidates in Screening for Sr. Software Engineer"
+Isaac says: "Show me all candidates in Screening for Sr Front End Developer"
 Claude queries ClickUp and returns a formatted list.
 
 Other queries:
 - "Who's been in Replied for more than 2 days?"
-- "How many candidates per channel for Sr. Software Engineer?"
-- "Show me all LI Recruiter contacts this week"
+- "How many candidates per channel for Senior Product Manager?"
+- "Show me all LinkedIn Recruiter contacts this week"
+
+## Implementation Notes
+- All 8 ClickUp list IDs are documented in `scripts/config_template.py`
+- All 11 custom field IDs and channel option IDs are available
+- ClickUp API rate limit: 100 requests/minute (Business plan)
+- Use the ClickUp MCP tools or direct API calls
 
 ## Dependencies
-- ClickUp MCP tools must be functional (clickup_create_task, clickup_update_task, clickup_search, etc.)
-- Phase 1 must be complete (structure exists)
+- ClickUp MCP tools must be functional
+- Phase 1 complete (✅)
 
 ## Success Criteria
 - Claude can create a candidate task with all fields via natural language
