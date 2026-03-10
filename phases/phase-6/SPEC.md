@@ -1,59 +1,88 @@
 # Phase 6: Gemini Notes Integration
 
-**Status: 🔲 NOT STARTED**
-**Dependencies: Phase 1 (complete), Phase 2 (not started)**
+**Status: ✅ COMPLETE**
+**Completed: March 2026**
 
 ## Objective
-Every Google Meet interview note captured by Gemini gets pushed as a timestamped comment on the candidate's ClickUp task. Build a full chronological activity log per candidate.
+Automatically sync Google Meet interview notes from Gemini into the corresponding ClickUp candidate task. Build a full chronological activity log per candidate.
 
-## Design
+## How It Works
 
-### 6.1 Activity Log (Task Comments)
-Each candidate task should have a complete chronological history in its comments:
+### Detection
+A scheduled Claude task (`gemini-notes-to-clickup`) runs every 30 minutes on weekdays 9am-6pm. It:
+1. Searches Google Calendar for events containing "iGaming" in the last 24 hours
+2. Filters for events that have ended AND have a "Notes by Gemini" attachment
+3. Identifies the candidate from the attendee list (non-Isaac, non-Nata email)
 
+### Matching
+The automation matches the candidate to a ClickUp task using:
+- **Primary:** Candidate's calendar email → exact match across all 8 ClickUp lists
+- **Fallback:** Candidate's name from the event title → name search across all lists
+- **Priority:** Prefers tasks in "replied" status (most likely to be interview candidates)
+
+### Note Extraction
+Gemini notes are stored as a Google Doc attached to the calendar event. The automation:
+- Fetches the doc via Google Drive API
+- Extracts the Summary and Details sections (skips the full transcript to keep it concise)
+- Formats as a timestamped comment with icons
+
+### ClickUp Update
+For each matched task:
+1. Adds a formatted comment with Gemini notes summary, details, attendees, and doc link
+2. Sets the Interview Date field to the calendar event date
+3. Moves status to "interviewed" (if currently in "replied" or "outreach sent")
+
+## Calendar Event Convention
+
+### Naming
+- **Isaac's interviews:** Event description contains "Isaac iGaming"
+- **Nata's interviews:** Event description contains "NATA iGaming"
+- Event titles are set by Calendly: "[Candidate Name] and Isaac Marks"
+
+### Structure
+Events are created via Calendly with Google Meet. After the call:
+- Gemini auto-generates notes and attaches them to the calendar event
+- The attachment appears as a Google Doc with title: "[Names] - [date] - Notes by Gemini"
+- The doc contains: Summary, Details (bullet points), and full Transcript
+
+## Comment Format in ClickUp
 ```
-[Mar 2, 2026] 📧 Outreach sent via Instantly — Campaign: SmartState-PM-Q1
-[Mar 7, 2026] ↩️ Replied — "Interested, would love to learn more about the role"
-[Mar 8, 2026] 📞 Screening call scheduled for Mar 10
-[Mar 10, 2026] 📞 Screening call completed — Notes: [summary]
-[Mar 12, 2026] 🎥 Interview on Google Meet — Gemini Notes:
-    - Strong React/TypeScript skills
-    - 5 years experience, Series B startup
-    - Led Vue → React migration
-    - Salary range $125-135k
-    - Available in 2 weeks
-    - Recommendation: Submit to client
-[Mar 12, 2026] 📤 Submitted to SmartState
-[Mar 15, 2026] ✅ SmartState feedback: Moving to final round
+🎥 Interview on Google Meet — Mar 9, 2026, 2:30 PM EDT
+
+📝 Gemini Notes Summary:
+[AI-generated summary of the interview]
+
+📋 Details:
+[Bullet-point details from Gemini]
+
+📅 Calendar Event: [event title]
+👤 Attendees: [email list]
+🔗 Notes Doc: [link to Google Doc]
 ```
 
-**Note:** Some of this activity logging is already partially happening via the Notes field (email messages from Instantly and Heyreach conversations are synced there). Phase 6 would move this to structured comments instead.
+## Test Results
+Successfully tested with the Regis Kian interview (Mar 9, 2026):
+- ✅ Found "iGaming" event on Google Calendar with Gemini notes attachment
+- ✅ Fetched Gemini doc (4,974 chars including summary, details, transcript)
+- ✅ Matched regisksc@gmail.com to ClickUp task in Senior Flutter Developer list
+- ✅ Added formatted comment with interview summary and details
+- ✅ Updated Interview Date to 2026-03-09
+- ✅ Moved status from "replied" → "interviewed"
+- ✅ Verified task at https://app.clickup.com/t/86b8tqye4
 
-### 6.2 Gemini Notes Workflow
-1. Isaac conducts interview on Google Meet
-2. Gemini captures meeting notes automatically
-3. After the call, Isaac copies Gemini notes
-4. Isaac tells Claude: "Add interview notes for [Name]: [paste notes]"
-5. Claude creates a timestamped comment on the task (not a field update)
-6. Claude updates status to "interviewed" and sets Interview Date
+## Scheduled Task
+- **Task ID:** gemini-notes-to-clickup
+- **Schedule:** Every 30 minutes, weekdays 9am-6pm ET
+- **Location:** ~/Documents/Claude/Scheduled/gemini-notes-to-clickup/SKILL.md
 
-### 6.3 Future Automation (Optional)
-- Google Meet API / Gemini API integration to auto-push notes
-- Would eliminate the manual copy-paste step
-- Depends on API availability and permissions
-
-## Implementation
-- Use ClickUp's task comment API (`POST /task/{task_id}/comment`)
-- Format comments with timestamps and activity type icons
-- Every interaction gets logged as a comment, not just interview notes
-- Migrate current Notes field data to comments if desired
+## Known Considerations
+- **Email mismatch:** Some candidates use different emails for calendar vs. their ClickUp profile (e.g., Tony Kakai: clynton.kakai@gmail.com on Calendar vs. ckakai17@gsb.columbia.edu in ClickUp). Name fallback handles this.
+- **Multiple matches:** When a candidate appears in multiple job lists, the automation prefers the "replied" status task.
+- **Duplicate prevention:** The scheduled task checks if "Gemini Notes Summary" comment already exists before re-processing.
+- **Candidate Rating:** The rating field is an emoji star (max 3), not 1-5. Isaac rates manually after reviewing notes.
 
 ## Dependencies
-- Phase 1 complete (✅ — tasks exist)
-- Phase 2 complete (Claude can update tasks) — not started
-- Google Meet with Gemini note-taking enabled
-
-## Success Criteria
-- Every candidate task has a full activity log in comments
-- Gemini interview notes appear as formatted, timestamped comments
-- Activity log is chronological and easy to scan
+- Phase 1 complete (✅ — ClickUp tasks exist)
+- Google Calendar connector (✅ — connected)
+- Google Drive connector (✅ — connected for Gemini doc fetching)
+- Gemini note-taking enabled on Google Meet (✅ — confirmed working)
