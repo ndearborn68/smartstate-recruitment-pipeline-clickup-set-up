@@ -4,7 +4,6 @@ SmartState ClickUp Manager — Phase 2: Claude as ClickUp Interface
 Provides: create, update, search, dedup, query operations on candidate tasks.
 """
 
-import os
 import requests
 import json
 import sys
@@ -12,7 +11,7 @@ import time
 from datetime import datetime, timezone
 
 # ── Configuration ──────────────────────────────────────────
-CLICKUP_API_TOKEN = os.environ.get("CLICKUP_API_TOKEN", "YOUR_TOKEN_HERE")
+CLICKUP_API_TOKEN = "pk_26113592_F5KRETBMSVF27NK19MNRRV2Y89ATXUE9"
 CLICKUP_BASE = "https://api.clickup.com/api/v2"
 HEADERS = {
     "Authorization": CLICKUP_API_TOKEN,
@@ -89,7 +88,7 @@ CHANNELS = {
 # Valid statuses
 STATUSES = [
     "outreach sent", "replied", "screening", "interviewed",
-    "submitted to client", "client review", "hired", "complete"
+    "submitted to client", "client review", "rejected", "hired", "complete"
 ]
 
 RATE_LIMIT_DELAY = 0.7  # seconds between API calls to stay under 100/min
