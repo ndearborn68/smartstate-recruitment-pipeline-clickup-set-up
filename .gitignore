@@ -1,7 +1,11 @@
 # API keys and secrets
 .env
-config.py
 secrets.*
+
+# Notification system — local overrides and runtime state
+scripts/notifications/config_local.py
+scripts/notifications/state.json
+scripts/notifications/state.json.tmp
 
 # Large data exports (keep templates, not full dumps)
 instantly_leads.json
