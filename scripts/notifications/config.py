@@ -64,3 +64,12 @@ HEALTH_CHECK_INTERVAL_HOURS = 6  # How often to post account health report
 
 # --- State ---
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
+
+# --- Load local overrides (config_local.py is gitignored) ---
+try:
+    from config_local import *  # noqa: F401, F403
+except ImportError:
+    try:
+        from .config_local import *  # noqa: F401, F403
+    except ImportError:
+        pass

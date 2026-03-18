@@ -73,14 +73,17 @@ def format_reply_block(
         f"{ts_str}"
     )
 
-    body = message_body.strip()[:3000]  # Slack block text limit
+    # Slack block text max is 3000 chars — split into multiple blocks if needed
+    full_body = message_body.strip()
+    body_chunks = [full_body[i:i+2900] for i in range(0, max(len(full_body), 1), 2900)]
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": header}},
         {"type": "section", "text": {"type": "mrkdwn", "text": meta}},
         {"type": "divider"},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"```{body}```"}},
     ]
+    for chunk in body_chunks:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"```{chunk}```"}})
 
     if clickup_url:
         blocks.append({

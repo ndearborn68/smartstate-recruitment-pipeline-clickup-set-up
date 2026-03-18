@@ -230,15 +230,13 @@ def run() -> int:
                 except Exception as e:
                     print(f"[heyreach] ClickUp lookup failed: {e}")
 
-            # Format source label and message prefix
-            if msg["direction"] == "INBOUND":
-                source = "Heyreach (LinkedIn) — Candidate Reply"
-                body_prefix = "[INBOUND REPLY]\n"
-            else:
-                source = "Heyreach (LinkedIn) — Sent"
-                body_prefix = "[OUTBOUND MESSAGE]\n"
+            # Only notify on inbound replies (candidate replied)
+            if msg["direction"] != "INBOUND":
+                state_manager.mark_notified(SOURCE_KEY, msg["unique_id"])
+                continue
 
-            full_body = body_prefix + msg["message_text"]
+            source = "Heyreach (LinkedIn)"
+            full_body = msg["message_text"]
 
             blocks = slack_client.format_reply_block(
                 source=source,

@@ -58,15 +58,20 @@ def strip_html(html: str) -> str:
 
 # ── Instantly API helpers ────────────────────────────────────────────────────
 
+def _auth_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {config.INSTANTLY_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
 def _get(path: str, params: dict = None) -> dict:
     time.sleep(RATE_LIMIT_DELAY)
-    all_params = {"api_key": config.INSTANTLY_API_KEY}
-    if params:
-        all_params.update(params)
     try:
         resp = requests.get(
             f"{config.INSTANTLY_BASE_URL}{path}",
-            params=all_params,
+            headers=_auth_headers(),
+            params=params or {},
             timeout=30,
         )
         if resp.status_code != 200:
@@ -80,12 +85,11 @@ def _get(path: str, params: dict = None) -> dict:
 
 def _post(path: str, payload: dict) -> dict:
     time.sleep(RATE_LIMIT_DELAY)
-    body = {"api_key": config.INSTANTLY_API_KEY}
-    body.update(payload)
     try:
         resp = requests.post(
             f"{config.INSTANTLY_BASE_URL}{path}",
-            json=body,
+            headers=_auth_headers(),
+            json=payload,
             timeout=30,
         )
         if resp.status_code != 200:
