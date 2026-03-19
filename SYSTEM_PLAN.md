@@ -82,9 +82,21 @@ Sends urgent alert immediately for any Critical account.
 **Twilio from:** +1 (510) 871-8295
 **Enrichment:** LeadMagic — phone by LinkedIn URL (SMS leads), LinkedIn URL by email (InMail leads)
 
-**Still needed:** SMS copy text (use [name] as first name placeholder)
+**SMS copy:** "Hey [name], hope you don't mind the reach out on your mobile. Following up on my LinkedIn message about the [job_role] at SmartState — wanted to make sure it didn't get lost. If you want to talk, just text me back."
 
-**Status:** ✅ BUILT — awaiting SMS copy to activate Twilio sending
+**SMS reply handler:** Supabase Edge Function deployed — replies post to Slack + forward to Isaac's cell (+1 347 417 2002)
+
+**⚠️ BLOCKED: Twilio 10DLC registration required**
+US carriers are blocking outbound SMS until the number is registered for A2P messaging.
+- Go to console.twilio.com → Messaging → Regulatory Compliance → A2P 10DLC
+- Register Brand (business name, EIN, website)
+- Register Campaign (use case: recruitment follow-up)
+- Link +1 (510) 871-8295 to the campaign
+- Approval: 24–48 hours
+
+**Also needed:** Set Twilio webhook for (510) 871-8295 → Messaging → A message comes in → POST → `https://uckcplhvjtxnkyxhccxr.supabase.co/functions/v1/sms-reply-handler`
+
+**Status:** ✅ BUILT — blocked on Twilio 10DLC registration
 
 ---
 
