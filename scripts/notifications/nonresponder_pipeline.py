@@ -20,9 +20,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 try:
-    from . import config, state_manager
+    from . import config, state_manager, clickup_manager
 except ImportError:
-    import config, state_manager
+    import config, state_manager, clickup_manager
 
 SOURCE_KEY   = "nonresponder"
 CDP_SCRIPT   = os.path.expanduser("~/.claude/skills/chrome-cdp/scripts/cdp.mjs")
@@ -60,26 +60,22 @@ def _find_linkedin_recruiter_target() -> Optional[str]:
 
 # ── LinkedIn Recruiter scraper ────────────────────────────────────────────────
 
-def get_linkedin_recruiter_nonresponders() -> list:
+def _scrape_project_nonresponders(target: str, project_id: int, job_role: str, list_id: str) -> list:
     """
-    Scrape LinkedIn Recruiter 'Awaiting Reply' inbox via Chrome CDP.
-    Returns leads pending 2+ days: [{name, sent_at, source, linkedin_url, email, phone}]
-    Requires Chrome to be open on the LinkedIn Recruiter inbox tab.
+    Navigate to a LinkedIn Recruiter project's Awaiting Reply page and
+    scrape non-responders older than NO_REPLY_DAYS. Returns list of lead dicts.
     """
-    target = _find_linkedin_recruiter_target()
-    if not target:
-        print("[nonresponder] LinkedIn Recruiter tab not open — skipping")
-        return []
+    url = f"https://www.linkedin.com/talent/inbox/0/awaitingreply?projectId={project_id}"
+    subprocess.run(["node", CDP_SCRIPT, "nav", target, url], capture_output=True, timeout=15)
+    time.sleep(2.5)
 
-    print(f"[nonresponder] LinkedIn Recruiter tab found: {target}")
-
-    # Scroll the conversation list to load all entries
+    # Scroll to load all conversations
     scroll_expr = (
         "var p=document.querySelector('._conversations-container_zkxis6');"
         "if(p){p.scrollTop=p.scrollHeight;p.scrollHeight;}else{0;}"
     )
     prev_h = 0
-    for _ in range(12):
+    for _ in range(10):
         raw = _cdp_eval(target, scroll_expr)
         try:
             h = int(raw)
@@ -90,7 +86,6 @@ def get_linkedin_recruiter_nonresponders() -> list:
         prev_h = h
         time.sleep(1.5)
 
-    # Extract names + dates
     extract = (
         "JSON.stringify("
         "Array.from(document.querySelectorAll('li')).filter(function(el){"
@@ -104,12 +99,11 @@ def get_linkedin_recruiter_nonresponders() -> list:
     try:
         items = json.loads(raw)
     except Exception:
-        print("[nonresponder] Could not parse LinkedIn Recruiter list")
         return []
 
-    cutoff     = datetime.now(timezone.utc) - timedelta(days=config.NO_REPLY_DAYS)
-    cur_year   = datetime.now().year
-    results    = []
+    cutoff   = datetime.now(timezone.utc) - timedelta(days=config.NO_REPLY_DAYS)
+    cur_year = datetime.now().year
+    results  = []
 
     for item in items:
         date_str = (item.get("date") or "").strip()
@@ -120,19 +114,52 @@ def get_linkedin_recruiter_nonresponders() -> list:
         except Exception:
             continue
         if dt > cutoff:
-            continue  # Too recent
+            continue
 
         results.append({
             "name":         item["name"],
             "sent_at":      dt,
             "source":       "linkedin_recruiter",
+            "job_role":     job_role,
+            "clickup_list": list_id,
             "linkedin_url": "",
             "email":        "",
             "phone":        "",
         })
 
-    print(f"[nonresponder] LinkedIn Recruiter: {len(results)} non-responder(s)")
     return results
+
+
+def get_linkedin_recruiter_nonresponders() -> list:
+    """
+    Scrape each LinkedIn Recruiter project's Awaiting Reply list via Chrome CDP.
+    Returns leads pending 2+ days with job_role and clickup_list tagged.
+    Requires Chrome to be open on any LinkedIn Talent tab.
+    """
+    target = _find_linkedin_recruiter_target()
+    if not target:
+        print("[nonresponder] LinkedIn Recruiter tab not open — skipping")
+        return []
+
+    print(f"[nonresponder] LinkedIn Recruiter tab found: {target}")
+    all_results = []
+
+    for project_id, info in clickup_manager.LINKEDIN_PROJECT_MAP.items():
+        job_role = info["job_role"]
+        list_id  = info["list_id"]
+        leads    = _scrape_project_nonresponders(target, project_id, job_role, list_id)
+        if leads:
+            print(f"[nonresponder]   {job_role}: {len(leads)} non-responder(s)")
+        all_results.extend(leads)
+
+    # Navigate back to main awaiting reply page
+    subprocess.run(
+        ["node", CDP_SCRIPT, "nav", target, "https://www.linkedin.com/talent/inbox/0/awaitingreply"],
+        capture_output=True, timeout=15,
+    )
+
+    print(f"[nonresponder] LinkedIn Recruiter total: {len(all_results)} non-responder(s)")
+    return all_results
 
 
 # ── Heyreach non-responder detection ─────────────────────────────────────────
@@ -226,6 +253,8 @@ def get_heyreach_nonresponders() -> list:
                 "name":         name,
                 "sent_at":      sent_at,
                 "source":       "heyreach",
+                "job_role":     "LinkedIn (Heyreach)",  # campaign not reliably known per conversation
+                "clickup_list": "",                      # can't reliably map to list without campaign
                 "linkedin_url": linkedin_url,
                 "email":        email,
                 "phone":        "",
@@ -374,7 +403,7 @@ def enrich_lead(name: str, linkedin_url: str) -> dict:
 
 # ── Twilio SMS ────────────────────────────────────────────────────────────────
 
-def send_sms(to_phone: str, name: str) -> bool:
+def send_sms(to_phone: str, name: str, job_role: str = "") -> bool:
     """Send follow-up SMS via Twilio. Returns True on success."""
     if not to_phone or not config.TWILIO_ACCOUNT_SID or not config.FOLLOWUP_SMS_COPY:
         return False
@@ -386,7 +415,11 @@ def send_sms(to_phone: str, name: str) -> bool:
     phone = "+" + digits
 
     first_name = name.split()[0] if name else "there"
-    body = config.FOLLOWUP_SMS_COPY.replace("[name]", first_name)
+    body = (
+        config.FOLLOWUP_SMS_COPY
+        .replace("[name]", first_name)
+        .replace("[job_role]", job_role or "the role")
+    )
 
     try:
         resp = requests.post(
@@ -443,7 +476,7 @@ def run() -> int:
 
     processed = 0
 
-    # --- Route 1: LinkedIn Recruiter + Heyreach → SMS ---
+    # --- Route 1: LinkedIn Recruiter + Heyreach → ClickUp task + SMS ---
     for lead in sms_leads:
         uid = (
             f"followup:{lead['source']}:"
@@ -459,11 +492,26 @@ def run() -> int:
             lead["phone"] = enriched["phone"]
             time.sleep(1)
 
-        # Send SMS directly
-        sms_sent = send_sms(lead["phone"], lead["name"])
+        # Ensure ClickUp task exists (create if missing, set to outreach sent)
+        list_id  = lead.get("clickup_list") or config.CLICKUP_LIST_IDS.get(lead.get("job_role", ""), "")
+        task_url = None
+        if list_id:
+            task_url = clickup_manager.create_task(
+                list_id      = list_id,
+                name         = lead["name"],
+                status       = "outreach sent",
+                linkedin_url = lead.get("linkedin_url", ""),
+                email        = lead.get("email", ""),
+                phone        = lead.get("phone", ""),
+                source       = lead["source"],
+                job_role     = lead.get("job_role", ""),
+            )
 
-        # Also push to Clay SMS table
-        days = (datetime.now(timezone.utc) - lead["sent_at"]).days if lead.get("sent_at") else ""
+        # Send SMS
+        sms_sent = send_sms(lead["phone"], lead["name"], lead.get("job_role", ""))
+
+        # Push to Clay SMS table
+        days     = (datetime.now(timezone.utc) - lead["sent_at"]).days if lead.get("sent_at") else ""
         clay_sms = push_to_clay(
             getattr(config, "CLAY_SMS_WEBHOOK", ""),
             {
@@ -472,10 +520,16 @@ def run() -> int:
                 "phone":        lead.get("phone", ""),
                 "email":        lead.get("email", ""),
                 "linkedin_url": lead.get("linkedin_url", ""),
+                "job_role":     lead.get("job_role", ""),
                 "source":       lead["source"],
                 "days_pending": days,
+                "clickup_url":  task_url or "",
             },
         )
+
+        # Move ClickUp task to SMS Sent if SMS was sent
+        if (sms_sent or clay_sms) and list_id:
+            clickup_manager.set_sms_sent(list_id, lead["name"], lead.get("linkedin_url", ""))
 
         if sms_sent or clay_sms:
             actioned[uid] = {
@@ -484,10 +538,11 @@ def run() -> int:
                 "sms_sent":    sms_sent,
                 "clay_sms":    clay_sms,
                 "phone":       lead.get("phone", ""),
+                "clickup_url": task_url or "",
             }
             state_manager.save_state(state)
             processed += 1
-            print(f"[nonresponder] SMS route: {lead['name']} ({lead['source']}) — SMS:{sms_sent} Clay:{clay_sms}")
+            print(f"[nonresponder] SMS route: {lead['name']} ({lead['source']}) — SMS:{sms_sent} Clay:{clay_sms} ClickUp:{'✓' if task_url else '✗'}")
         else:
             print(f"[nonresponder] Skipped {lead['name']} — no phone found, no Clay webhook set")
 
