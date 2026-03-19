@@ -143,15 +143,27 @@ def post_health_report(accounts: list) -> bool:
         f"{counts['Critical']} critical"
     )
 
-    report_text = "\n".join(lines)
-    full_text = f"📊 *Sending Account Health Report — {timestamp}*\n\n{report_text}\n\n_{summary}_"
+    full_text = f"📊 *Sending Account Health Report — {timestamp}*\n\n" + "\n".join(lines) + f"\n\n_{summary}_"
 
+    # Split lines into chunks that fit within Slack's 3000-char section limit
     blocks = [
         {
             "type": "header",
             "text": {"type": "plain_text", "text": f"📊 Account Health Report — {timestamp}"},
         },
-        {"type": "section", "text": {"type": "mrkdwn", "text": report_text}},
+    ]
+    chunk, chunk_len = [], 0
+    for line in lines:
+        line_len = len(line) + 1  # +1 for newline
+        if chunk and chunk_len + line_len > 2900:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(chunk)}})
+            chunk, chunk_len = [], 0
+        chunk.append(line)
+        chunk_len += line_len
+    if chunk:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(chunk)}})
+
+    blocks += [
         {"type": "context", "elements": [{"type": "mrkdwn", "text": summary}]},
         {"type": "divider"},
     ]
