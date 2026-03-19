@@ -83,7 +83,7 @@ def format_reply_block(
         {"type": "divider"},
     ]
     for chunk in body_chunks:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"```{chunk}```"}})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": chunk}})
 
     if clickup_url:
         blocks.append({
