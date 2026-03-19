@@ -27,12 +27,14 @@ try:
     from . import config
     from . import instantly_notifier
     from . import heyreach_notifier
+    from . import linkedin_recruiter_notifier
     from . import health_monitor
     from . import state_manager
 except ImportError:
     import config
     import instantly_notifier
     import heyreach_notifier
+    import linkedin_recruiter_notifier
     import health_monitor
     import state_manager
 
@@ -49,12 +51,13 @@ def run_once() -> dict:
     summary = {
         "instantly": 0,
         "heyreach": 0,
+        "linkedin": 0,
         "health_posted": False,
         "errors": [],
     }
 
     # 1. Instantly reply notifier
-    print("\n[1/3] Instantly reply notifier...")
+    print("\n[1/4] Instantly reply notifier...")
     try:
         summary["instantly"] = instantly_notifier.run()
     except Exception as e:
@@ -63,7 +66,7 @@ def run_once() -> dict:
         summary["errors"].append(msg)
 
     # 2. Heyreach message notifier
-    print("\n[2/3] Heyreach message notifier...")
+    print("\n[2/4] Heyreach message notifier...")
     try:
         summary["heyreach"] = heyreach_notifier.run()
     except Exception as e:
@@ -71,8 +74,17 @@ def run_once() -> dict:
         print(f"ERROR: {msg}")
         summary["errors"].append(msg)
 
-    # 3. Account health monitor (respects HEALTH_CHECK_INTERVAL_HOURS)
-    print("\n[3/3] Account health monitor...")
+    # 3. LinkedIn Recruiter InMail notifier
+    print("\n[3/4] LinkedIn Recruiter InMail notifier...")
+    try:
+        summary["linkedin"] = linkedin_recruiter_notifier.run()
+    except Exception as e:
+        msg = f"LinkedIn notifier error: {e}"
+        print(f"ERROR: {msg}")
+        summary["errors"].append(msg)
+
+    # 4. Account health monitor (respects HEALTH_CHECK_INTERVAL_HOURS)
+    print("\n[4/4] Account health monitor...")
     try:
         summary["health_posted"] = health_monitor.run(force=False)
     except Exception as e:
@@ -89,7 +101,7 @@ def run_once() -> dict:
         pass
 
     print(f"\n{'='*60}")
-    print(f"Done — Instantly: {summary['instantly']} | Heyreach: {summary['heyreach']} | Health: {'posted' if summary['health_posted'] else 'skipped'}")
+    print(f"Done — Instantly: {summary['instantly']} | Heyreach: {summary['heyreach']} | LinkedIn: {summary['linkedin']} | Health: {'posted' if summary['health_posted'] else 'skipped'}")
     if summary["errors"]:
         print(f"Errors: {len(summary['errors'])}")
         for err in summary["errors"]:
