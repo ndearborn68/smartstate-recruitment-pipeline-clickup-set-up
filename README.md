@@ -6,43 +6,81 @@ Multi-channel recruitment automation system built on ClickUp for RecruitCloud.
 **SmartState** — managed by RecruitCloud (isaac@recruitcloud.io)
 
 ## Overview
-A centralized ClickUp-based pipeline that tracks candidates across four outreach channels (Instantly, Heyreach, LinkedIn Recruiter, Inbound) with built-in deduplication and sync scripts.
+A centralized ClickUp-based pipeline that tracks candidates across four outreach channels (Instantly, Heyreach, LinkedIn Recruiter, Inbound) with built-in deduplication, sync scripts, and real-time Slack notifications.
 
 ## Architecture
 ```
-ClickUp (Source of Truth)
-├── Instantly (Email Campaigns) ──→ ClickUp via sync_to_clickup.py
-├── Heyreach (LinkedIn Outreach) ──→ ClickUp via sync_heyreach_v2.py
-├── LinkedIn Recruiter (Manual) ──→ ClickUp via Claude OCR (Phase 2)
-├── Inbound (Email Resume Scan) ──→ ClickUp via automation (Phase 3)
-│
-├── sync_messages.py ──→ Emails/messages → ClickUp Notes field
-├── update_all_linkedin.py ──→ LinkedIn URLs → ClickUp tasks
-└── dedup_clickup.py ──→ Duplicate cleanup
+Instantly (Email)  ──┐
+                     ├──→ ClickUp (Source of Truth)
+Heyreach (LinkedIn) ─┤
+                     └──→ Slack #smartstate-responses (inbound replies only)
+LinkedIn Recruiter ──→ ClickUp (manual)
+Inbound ─────────────→ ClickUp (Phase 3)
+
+Notifications System (scripts/notifications/)
+├── instantly_notifier.py  ──→ Email replies → Slack
+├── heyreach_notifier.py   ──→ LinkedIn replies → Slack (inbound only)
+├── health_monitor.py      ──→ Sending account health → Slack
+└── run_all.py             ──→ Orchestrator (runs all on schedule)
 ```
 
 ## Build Phases
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | ClickUp Foundation (Space, Folders, Fields, Statuses) | COMPLETE |
-| 1a | Instantly Lead Sync (444 leads across 3 campaigns) | COMPLETE |
-| 1b | LinkedIn Profile Population (155 Product Owner leads) | COMPLETE |
-| 1c | Instantly Email Sync (291 tasks updated with messages) | COMPLETE |
-| 1d | Heyreach Conversation Sync (31 updated + 19 new tasks) | COMPLETE |
-| 1e | Heyreach Campaign Creation (6 new draft campaigns) | COMPLETE |
-| 2 | Claude as Interface (MCP task management, OCR, dedup) | Pending |
-| 3 | Inbound Automations (reply detection, resume scanning) | Pending |
-| 4 | Slack Notifications (reply alerts to recruiter channel) | Pending |
-| 5 | SLAs, Alerts, Reporting Dashboard | Pending |
-| 6 | Gemini Notes Integration (interview notes as comments) | Pending |
+| 1 | ClickUp Foundation (Space, Folders, Fields, Statuses) | ✅ COMPLETE |
+| 1a | Instantly Lead Sync (491 leads across 9 campaigns) | ✅ COMPLETE |
+| 1b | LinkedIn Profile Population (155 Product Owner leads) | ✅ COMPLETE |
+| 1c | Instantly Email Sync (291 tasks updated with messages) | ✅ COMPLETE |
+| 1d | Heyreach Conversation Sync (31 updated + 19 new tasks) | ✅ COMPLETE |
+| 1e | Heyreach Campaign Creation (8 campaigns) | ✅ COMPLETE |
+| 2 | Slack Notifications (inbound reply alerts, health monitor) | ✅ COMPLETE |
+| 3 | Performance Reporting (reply rates, inbox health by channel) | 🔄 In Progress |
+| 4 | Inbound Automations (resume scanning, email inbox monitoring) | Pending |
+| 5 | Dedup Checker (block re-messaging existing candidates) | Pending |
+| 6 | SLAs, Alerts, Reporting Dashboard | Pending |
 
-## Current State (as of 2026-03-09)
+## Phase 2 — Slack Notifications (COMPLETE)
+
+### What was built
+Real-time Slack notifications to `#smartstate-responses` (Recruitcloud workspace):
+
+| Notifier | Trigger | Channel |
+|---|---|---|
+| `instantly_notifier.py` | Candidate replies to email campaign | `#smartstate-responses` |
+| `heyreach_notifier.py` | Candidate replies to LinkedIn message (inbound only) | `#smartstate-responses` |
+| `health_monitor.py` | Instantly sending account warmup/deliverability scores | `#smartstate-responses` |
+
+### Running the notifier
+```bash
+# Run once
+cd scripts/notifications
+python3 run_all.py
+
+# Run on continuous loop (every 15 min)
+python3 run_all.py --loop
+
+# Force health report now
+python3 run_all.py --health
+```
+
+### Setup
+1. Copy `scripts/notifications/config.py` → `scripts/notifications/config_local.py`
+2. Fill in: `SLACK_WEBHOOK_URL`, `INSTANTLY_API_KEY`, `HEYREACH_API_KEY`, `CLICKUP_API_TOKEN`
+3. All ClickUp list IDs, custom field IDs, and campaign mappings are pre-filled
+
+### Cron setup (every 15 minutes)
+```bash
+*/15 * * * * python3 /path/to/scripts/notifications/run_all.py >> /tmp/smartstate_notifier.log 2>&1
+0 */6 * * * python3 /path/to/scripts/notifications/run_all.py --health >> /tmp/smartstate_health.log 2>&1
+```
+
+## Current State (as of 2026-03-18)
 
 ### ClickUp Structure
 - **Space:** SmartState
 - **8 Folders** (one per job role), each with a Candidates list
-- **11 Custom Fields** per list: Email, Phone, LinkedIn, Channel, Campaign/Sequence, Date Contacted, Date Replied, Interview Date, Candidate Rating, Salary Range, Notes
+- **11 Custom Fields:** Email, Phone, LinkedIn, Channel, Campaign/Sequence, Date Contacted, Date Replied, Interview Date, Candidate Rating, Salary Range, Notes
 - **8 Pipeline Statuses:** Outreach Sent → Replied → Screening → Interviewed → Submitted to Client → Client Review → Hired → Complete
 
 ### Task Counts
@@ -57,52 +95,71 @@ ClickUp (Source of Truth)
 | Senior Manual QA Engineer | 0 | Awaiting leads |
 | Affiliate Manager | 0 | Awaiting leads |
 
-### Heyreach Campaigns
-| Campaign | Status | Heyreach ID |
-|----------|--------|-------------|
-| Product Manager | Active | 354909 |
-| Mid Flutter | Active | 349645 |
-| Senior Flutter Developer | Draft | 357063 |
-| Lead HTML Markup Developer | Draft | 357067 |
-| Sr Front End Developer | Draft | 357072 |
-| Senior Backend Developer | Draft | 357074 |
-| Senior Manual QA Engineer | Draft | 357075 |
-| Affiliate Manager | Draft | 357076 |
+### Heyreach Campaigns (SmartState only)
+| Campaign | Status | ID |
+|---|---|---|
+| Product Manager | IN_PROGRESS | 354909 |
+| Mid Flutter | IN_PROGRESS | 349645 |
+| Senior Flutter Developer | DRAFT | 357063 |
+| Frontend Lead Leader V2 | FINISHED | 357067 |
+| Frontend Mid-Level V2 | FINISHED | 357072 |
+| Senior Backend Developer | DRAFT | 357074 |
+| Senior Manual QA Engineer | DRAFT | 357075 |
+| Affiliate Manager | DRAFT | 357076 |
+
+### Instantly Campaigns (SmartState only)
+| Campaign | Status | ID |
+|---|---|---|
+| Product Owner | Active | 3cc1f7ae-... |
+| Senior Flutter | Completed | 8b6cb40c-... |
+| Middle Flutter Developer | Completed | 6284a72c-... |
+| Senior HTML | Completed | ff1fb3e5-... |
+| Mid HTML | Completed | f241305e-... |
+| Senior Front End | Completed | d0da5edd-... |
+| Senior Back End | Completed | 0ccefc2b-... |
+| Affiliate Manager | Completed | 05f6e117-... |
+| Manual QA Postman | Error | b6a30d37-... |
+| Frontend Lead Leader V2 | Draft | 2584f7fc-... |
+| Frontend Mid-Level V2 | Draft | 33b44493-... |
 
 ## Scripts
 
+### Notifications (`scripts/notifications/`)
+- **`run_all.py`** — Orchestrator. Runs all notifiers. Supports `--loop` and `--health` flags.
+- **`instantly_notifier.py`** — Polls Instantly v2 API for new email replies, posts to Slack.
+- **`heyreach_notifier.py`** — Polls Heyreach for new inbound LinkedIn messages, posts to Slack.
+- **`health_monitor.py`** — Checks Instantly warmup health per sending account, posts report to Slack. Fires urgent alert for Critical accounts.
+- **`slack_client.py`** — Slack message formatting and posting utilities.
+- **`state_manager.py`** — Persistent state (state.json) to prevent duplicate notifications.
+- **`config.py`** — Config template. Copy to `config_local.py` and fill in secrets.
+
 ### Sync Scripts (`scripts/sync/`)
-- **`sync_to_clickup.py`** — Fetches leads from Instantly API, creates ClickUp tasks with custom fields (Channel, Email, Campaign, Date Contacted, LinkedIn). Handles rate limiting (100 req/min).
-- **`sync_messages.py`** — Pulls emails from Instantly API, extracts last sent + all replies per lead, updates ClickUp Notes field and Date Replied.
-- **`sync_heyreach_v2.py`** — Fetches Heyreach LinkedIn conversations, updates existing ClickUp tasks with Heyreach notes, creates new tasks for Heyreach-only leads.
-- **`dedup_clickup.py`** — Finds and removes duplicate tasks within each ClickUp list (matches by email).
-- **`sync_heyreach_v1.py`** — (Deprecated) First attempt, timed out on shared lead lists.
+- **`sync_to_clickup.py`** — Fetches leads from Instantly API, creates ClickUp tasks.
+- **`sync_messages.py`** — Pulls emails from Instantly, updates ClickUp Notes + Date Replied.
+- **`sync_heyreach_v2.py`** — Fetches Heyreach conversations, updates ClickUp tasks.
+- **`dedup_clickup.py`** — Finds and removes duplicate tasks within each ClickUp list.
+- **`bulk_sync_remaining.py`** — Syncs remaining Instantly campaigns to ClickUp.
 
 ### Utility Scripts (`scripts/utils/`)
-- **`update_all_linkedin.py`** — Updates all ClickUp tasks across campaigns with LinkedIn URLs from Instantly data.
-- **`extract_linkedin_all.py`** — Fetches individual Instantly leads to extract LinkedIn URLs (handles `LinkedIn_personURL` field).
-- **`check_remaining.py`** — Checks remaining 6 Instantly campaigns for lead counts.
-- Other helper scripts for LinkedIn extraction and lead re-fetching.
+- **`update_all_linkedin.py`** — Bulk updates LinkedIn URLs across ClickUp tasks.
+- **`extract_linkedin_all.py`** — Extracts LinkedIn URLs from Instantly leads.
+- **`check_remaining.py`** — Checks remaining campaign lead counts in Instantly.
 
 ### Configuration
-- Copy `scripts/config_template.py` → `scripts/config.py` and fill in API keys.
-- **Never commit `config.py`** — it contains secrets.
+- Copy `scripts/notifications/config.py` → `scripts/notifications/config_local.py` and fill in API keys.
+- Copy `scripts/config_template.py` → `scripts/config.py` for sync scripts.
+- **Never commit `config_local.py` or `config.py`** — gitignored.
 
-## Key Files
-- `docs/smartstate-build-plan.md` — Master build plan with all decisions
-- `mockups/smartstate-clickup-mockup.html` — Interactive visual mockup
-- `phases/` — Detailed specs per phase
-- `scripts/` — All sync and utility scripts
-- `data/` — LinkedIn mappings and reference data
-
-## Known Issues / Open Items
-1. **REJECTED status missing** — Lists have "complete" but no separate REJECTED status
-2. **Channel field is single-select** — Dual-channel leads (Instantly + Heyreach) only show one channel
-3. **No auto-sync** — Scripts must be run manually; scheduled sync not yet configured
-4. **5 empty lists** — Awaiting leads from Instantly/Heyreach for HTML, Front End, Backend, QA, Affiliate roles
-5. **No exclusion lists** — Draft Heyreach campaigns lack dedup rules
+## API Keys Required
+| Service | Used For |
+|---|---|
+| Instantly v2 API | Email reply polling, account health |
+| Heyreach API | LinkedIn conversation polling |
+| ClickUp API v2 | Task lookup for reply notifications |
+| Slack Incoming Webhook | Posting to #smartstate-responses |
 
 ## API Notes
-- **ClickUp API v2:** 100 requests/min (Business plan). Scripts use 0.65s delay + 62s pause every 95 requests.
-- **Instantly API v2:** SmartState leads use `LinkedIn_personURL` field (not `person_linkedIn`).
-- **Heyreach API:** Base URL `https://api.heyreach.io/api/public`. Auth via `X-API-KEY` header. Campaign creation only via browser UI (no API endpoint).
+- **Instantly API v2:** Auth via `Authorization: Bearer <key>`. Base URL `https://api.instantly.ai/api/v2`.
+- **Heyreach API:** Auth via `X-API-KEY` header. Base URL `https://api.heyreach.io/api/public`.
+- **ClickUp API v2:** 100 req/min. Scripts use 0.65s delay + 62s pause every 95 requests.
+- **Rate limiting:** All scripts use 0.65s delay between API calls to stay within limits.
