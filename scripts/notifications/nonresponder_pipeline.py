@@ -239,6 +239,109 @@ def get_heyreach_nonresponders() -> list:
     return results
 
 
+# ── Instantly non-responder detection ────────────────────────────────────────
+
+def get_instantly_nonresponders() -> list:
+    """
+    Find Instantly leads who were sent an email 2+ days ago with no reply.
+    Returns [{name, email, sent_at, source, linkedin_url, phone}]
+    LinkedIn URL is fetched via LeadMagic by email — these go to Clay LinkedIn table.
+    """
+    cutoff  = datetime.now(timezone.utc) - timedelta(days=config.NO_REPLY_DAYS)
+    headers = {
+        "Authorization": f"Bearer {config.INSTANTLY_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    results     = []
+    replied_emails = set()
+
+    # First pass: collect all emails that have replied (ue_type 2 or 3)
+    for campaign_id in config.INSTANTLY_CAMPAIGN_TO_ROLE:
+        cursor = None
+        while True:
+            time.sleep(0.65)
+            params = {"campaign_id": campaign_id, "limit": 100}
+            if cursor:
+                params["starting_after"] = cursor
+            try:
+                resp = requests.get(
+                    f"{config.INSTANTLY_BASE_URL}/emails",
+                    headers=headers, params=params, timeout=30,
+                )
+                data  = resp.json() if resp.status_code == 200 else {}
+                items = data.get("items", [])
+            except Exception:
+                break
+            for em in items:
+                if em.get("ue_type") in (2, 3):
+                    email = (em.get("lead") or em.get("from_address_email") or "").lower().strip()
+                    if email:
+                        replied_emails.add(email)
+            cursor = data.get("next_starting_after")
+            if not cursor or not items:
+                break
+
+    # Second pass: find sent emails (ue_type 1) with no reply that are 2+ days old
+    seen_leads = set()
+    for campaign_id, job_role in config.INSTANTLY_CAMPAIGN_TO_ROLE.items():
+        cursor = None
+        while True:
+            time.sleep(0.65)
+            params = {"campaign_id": campaign_id, "limit": 100}
+            if cursor:
+                params["starting_after"] = cursor
+            try:
+                resp = requests.get(
+                    f"{config.INSTANTLY_BASE_URL}/emails",
+                    headers=headers, params=params, timeout=30,
+                )
+                data  = resp.json() if resp.status_code == 200 else {}
+                items = data.get("items", [])
+            except Exception:
+                break
+
+            found_new = False
+            for em in items:
+                if em.get("ue_type") != 1:  # sent emails only
+                    continue
+                ts_raw = em.get("timestamp_email") or ""
+                if not ts_raw:
+                    continue
+                try:
+                    sent_at = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                    if sent_at.tzinfo is None:
+                        sent_at = sent_at.replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+
+                if sent_at > cutoff:
+                    found_new = True
+                    continue  # Too recent
+
+                lead_email = (em.get("lead") or em.get("to_address_email") or "").lower().strip()
+                if not lead_email or lead_email in replied_emails or lead_email in seen_leads:
+                    continue
+
+                seen_leads.add(lead_email)
+                name = lead_email.split("@")[0].replace(".", " ").title()
+                results.append({
+                    "name":         name,
+                    "email":        lead_email,
+                    "sent_at":      sent_at,
+                    "source":       "instantly",
+                    "linkedin_url": "",
+                    "phone":        "",
+                    "job_role":     job_role,
+                })
+
+            cursor = data.get("next_starting_after")
+            if not cursor or not found_new:
+                break
+
+    print(f"[nonresponder] Instantly: {len(results)} non-responder(s)")
+    return results
+
+
 # ── LeadMagic enrichment ──────────────────────────────────────────────────────
 
 def enrich_lead(name: str, linkedin_url: str) -> dict:
@@ -329,14 +432,19 @@ def run() -> int:
     actioned = state.setdefault("followup_sent", {})
 
     # Gather from all sources
-    leads = []
-    leads.extend(get_linkedin_recruiter_nonresponders())
-    leads.extend(get_heyreach_nonresponders())
-    # Instantly: TODO — add when sent-email tracking is in place
-    print(f"[nonresponder] Total non-responders found: {len(leads)}")
+    sms_leads      = []   # LinkedIn Recruiter + Heyreach → Clay SMS table
+    linkedin_leads = []   # Instantly → Clay LinkedIn table (for manual InMail)
+
+    sms_leads.extend(get_linkedin_recruiter_nonresponders())
+    sms_leads.extend(get_heyreach_nonresponders())
+    linkedin_leads.extend(get_instantly_nonresponders())
+
+    print(f"[nonresponder] SMS targets: {len(sms_leads)} | LinkedIn InMail targets: {len(linkedin_leads)}")
 
     processed = 0
-    for lead in leads:
+
+    # --- Route 1: LinkedIn Recruiter + Heyreach → SMS ---
+    for lead in sms_leads:
         uid = (
             f"followup:{lead['source']}:"
             + (lead["linkedin_url"] or lead["name"].lower().replace(" ", "_"))
@@ -344,17 +452,18 @@ def run() -> int:
         if uid in actioned:
             continue
 
-        # Enrich via LeadMagic if we have a LinkedIn URL
+        # Enrich via LeadMagic to get phone
         if lead["linkedin_url"] and not lead["phone"]:
             enriched      = enrich_lead(lead["name"], lead["linkedin_url"])
             lead["email"] = lead["email"] or enriched["email"]
             lead["phone"] = enriched["phone"]
             time.sleep(1)
 
-        # Send SMS
+        # Send SMS directly
         sms_sent = send_sms(lead["phone"], lead["name"])
 
-        # Push to Clay SMS table
+        # Also push to Clay SMS table
+        days = (datetime.now(timezone.utc) - lead["sent_at"]).days if lead.get("sent_at") else ""
         clay_sms = push_to_clay(
             getattr(config, "CLAY_SMS_WEBHOOK", ""),
             {
@@ -364,42 +473,73 @@ def run() -> int:
                 "email":        lead.get("email", ""),
                 "linkedin_url": lead.get("linkedin_url", ""),
                 "source":       lead["source"],
+                "days_pending": days,
+            },
+        )
+
+        if sms_sent or clay_sms:
+            actioned[uid] = {
+                "actioned_at": datetime.now(timezone.utc).isoformat(),
+                "route":       "sms",
+                "sms_sent":    sms_sent,
+                "clay_sms":    clay_sms,
+                "phone":       lead.get("phone", ""),
+            }
+            state_manager.save_state(state)
+            processed += 1
+            print(f"[nonresponder] SMS route: {lead['name']} ({lead['source']}) — SMS:{sms_sent} Clay:{clay_sms}")
+        else:
+            print(f"[nonresponder] Skipped {lead['name']} — no phone found, no Clay webhook set")
+
+        time.sleep(0.5)
+
+    # --- Route 2: Instantly → Clay LinkedIn table (manual InMail queue) ---
+    for lead in linkedin_leads:
+        uid = f"followup:instantly:{lead['email']}"
+        if uid in actioned:
+            continue
+
+        # Enrich via LeadMagic by email to get LinkedIn URL
+        if lead["email"] and not lead["linkedin_url"]:
+            try:
+                resp = requests.post(
+                    f"{LEADMAGIC_URL}/email-finder",
+                    headers={"X-BLOBR-KEY": LEADMAGIC_KEY, "Content-Type": "application/json"},
+                    json={"email": lead["email"]},
+                    timeout=20,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    lead["linkedin_url"] = (data.get("linkedin_url") or "").strip()
+            except Exception as e:
+                print(f"[nonresponder] LeadMagic email lookup error for {lead['email']}: {e}")
+            time.sleep(1)
+
+        clay_li = push_to_clay(
+            getattr(config, "CLAY_LINKEDIN_WEBHOOK", ""),
+            {
+                "name":         lead["name"],
+                "email":        lead["email"],
+                "linkedin_url": lead.get("linkedin_url", ""),
+                "job_role":     lead.get("job_role", ""),
+                "source":       "instantly",
                 "days_pending": (datetime.now(timezone.utc) - lead["sent_at"]).days
                                 if lead.get("sent_at") else "",
             },
         )
 
-        # Push to Clay Email table
-        clay_email = push_to_clay(
-            getattr(config, "CLAY_EMAIL_WEBHOOK", ""),
-            {
-                "name":         lead["name"],
-                "email":        lead.get("email", ""),
-                "linkedin_url": lead.get("linkedin_url", ""),
-                "source":       lead["source"],
-            },
-        )
-
-        if sms_sent or clay_sms or clay_email:
+        if clay_li:
             actioned[uid] = {
-                "actioned_at": datetime.now(timezone.utc).isoformat(),
-                "sms_sent":    sms_sent,
-                "clay_sms":    clay_sms,
-                "clay_email":  clay_email,
-                "phone":       lead.get("phone", ""),
-                "email":       lead.get("email", ""),
+                "actioned_at":  datetime.now(timezone.utc).isoformat(),
+                "route":        "linkedin_inmail",
+                "clay_li":      clay_li,
+                "linkedin_url": lead.get("linkedin_url", ""),
             }
             state_manager.save_state(state)
             processed += 1
-            print(
-                f"[nonresponder] Actioned: {lead['name']} ({lead['source']}) "
-                f"— SMS:{sms_sent} ClayS:{clay_sms} ClayE:{clay_email}"
-            )
+            print(f"[nonresponder] LinkedIn route: {lead['name']} <{lead['email']}> → Clay")
         else:
-            print(
-                f"[nonresponder] Skipped: {lead['name']} — "
-                "no phone found and no Clay webhooks configured yet"
-            )
+            print(f"[nonresponder] Skipped {lead['name']} — Clay LinkedIn webhook not set")
 
         time.sleep(0.5)
 
