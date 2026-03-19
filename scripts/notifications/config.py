@@ -59,6 +59,17 @@ INSTANTLY_CAMPAIGN_TO_ROLE = {
     # e.g. "uuid-here": "Senior Flutter Developer"
 }
 
+# --- Twilio ---
+TWILIO_ACCOUNT_SID  = ""
+TWILIO_AUTH_TOKEN   = ""
+TWILIO_FROM_NUMBER  = ""
+
+# --- Non-Responder Follow-Up ---
+NO_REPLY_DAYS       = 2
+FOLLOWUP_SMS_COPY   = ""          # Use [name] as placeholder for first name
+CLAY_SMS_WEBHOOK    = ""          # LinkedIn Recruiter + Heyreach non-responders → SMS
+CLAY_LINKEDIN_WEBHOOK = ""        # Instantly non-responders → LinkedIn Recruiter InMail
+
 # --- Scheduling ---
 POLL_INTERVAL_MINUTES = 15       # How often to poll for new replies
 HEALTH_CHECK_INTERVAL_HOURS = 6  # How often to post account health report
