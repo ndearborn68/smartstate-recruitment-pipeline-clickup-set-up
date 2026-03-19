@@ -67,14 +67,24 @@ Sends urgent alert immediately for any Critical account.
 5. Push to Clay webhook → routed to SMS or email follow-up
 6. Track in state.json so no one gets contacted twice
 
-**Channels used for follow-up:**
-- SMS via Twilio (Clay table → Twilio)
-- Email via Instantly (Clay table → Instantly campaign)
+**Routing:**
 
-**Note:** No automated LinkedIn Recruiter sending. That step is manual.
+| Source | No reply after 2 days | Action |
+|---|---|---|
+| LinkedIn Recruiter | → | Clay SMS table → Twilio SMS |
+| Heyreach (LinkedIn) | → | Clay SMS table → Twilio SMS |
+| Instantly (email) | → | Clay LinkedIn table → manual InMail queue |
 
-**Status:** 🔨 TO BUILD
-**Needs:** Twilio credentials, Clay webhook URLs, SMS copy, email copy
+**Clay webhooks:**
+- SMS: `pull-in-data-from-a-webhook-3f924fa2-4e23-44ff-89ac-81aafcc84e10`
+- LinkedIn InMail: `pull-in-data-from-a-webhook-7b4f2b4f-0f90-49de-a964-cb7095581875`
+
+**Twilio from:** +1 (510) 871-8295
+**Enrichment:** LeadMagic — phone by LinkedIn URL (SMS leads), LinkedIn URL by email (InMail leads)
+
+**Still needed:** SMS copy text (use [name] as first name placeholder)
+
+**Status:** ✅ BUILT — awaiting SMS copy to activate Twilio sending
 
 ---
 
