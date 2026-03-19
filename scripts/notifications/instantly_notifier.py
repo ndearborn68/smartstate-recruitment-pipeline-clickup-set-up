@@ -105,89 +105,73 @@ def _post(path: str, payload: dict) -> dict:
 
 def fetch_new_replies(since_dt: datetime) -> list:
     """
-    Query all tracked Instantly campaigns for leads that have replied since
-    since_dt. For each matching lead, fetches the full email thread.
+    Query all tracked Instantly campaigns for inbound replies since since_dt.
+    Uses GET /emails (v2) filtered to ue_type 2 (reply) and 3 (manual reply).
+    Paginates until all remaining emails are older than since_dt.
 
     Returns list of dicts:
         lead_email, lead_name, campaign_id, campaign_name, job_role,
-        reply_text (full body, HTML stripped), replied_at (datetime UTC)
+        reply_text (full body, HTML stripped), replied_at (datetime UTC),
+        unique_id
     """
     results = []
 
     for campaign_id, job_role in config.INSTANTLY_CAMPAIGN_TO_ROLE.items():
         print(f"[instantly] Checking campaign: {job_role} ({campaign_id})")
-        skip = 0
-        limit = 100
+        cursor = None
 
         while True:
-            data = _post("/lead/list", {
-                "campaign_id": campaign_id,
-                "reply_count_filter": 1,
-                "limit": limit,
-                "skip": skip,
-            })
+            params = {"campaign_id": campaign_id, "limit": 100}
+            if cursor:
+                params["starting_after"] = cursor
 
-            leads = data if isinstance(data, list) else data.get("data", [])
-            if not leads:
+            data = _get("/emails", params)
+            items = data.get("items", []) if isinstance(data, dict) else []
+            if not items:
                 break
 
-            for lead in leads:
-                lead_email = (lead.get("email") or "").strip().lower()
+            found_new = False
+            for em in items:
+                ts_raw = em.get("timestamp_email") or ""
+                if not ts_raw:
+                    continue
+
+                try:
+                    replied_at = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                    if replied_at.tzinfo is None:
+                        replied_at = replied_at.replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+
+                if replied_at <= since_dt:
+                    continue  # older than our window; skip but keep paginating (may be out of order)
+
+                # Only inbound replies
+                if em.get("ue_type") not in (2, 3):
+                    continue
+
+                found_new = True
+                lead_email = (em.get("lead") or em.get("from_address_email") or "").strip().lower()
                 if not lead_email:
                     continue
 
-                first = (lead.get("first_name") or "").strip()
-                last = (lead.get("last_name") or "").strip()
-                lead_name = f"{first} {last}".strip() or lead_email.split("@")[0]
+                # Derive name from email prefix (lead details not in /emails v2)
+                lead_name = lead_email.split("@")[0].replace(".", " ").title()
 
-                # Fetch full email thread
-                thread_data = _get("/emails/list", {
-                    "email": lead_email,
-                    "campaign_id": campaign_id,
-                    "limit": 50,
-                })
-                emails = thread_data if isinstance(thread_data, list) else thread_data.get("emails", [])
-                if not emails:
-                    continue
-
-                emails_sorted = sorted(emails, key=lambda e: e.get("timestamp_email") or e.get("created_at") or "")
-
-                # Find most recent inbound reply (ue_type 2=reply, 3=manual reply)
-                last_reply = None
-                for em in reversed(emails_sorted):
-                    if em.get("ue_type") in (2, 3):
-                        last_reply = em
-                        break
-
-                if not last_reply:
-                    continue
-
-                # Parse replied_at
-                ts_raw = last_reply.get("timestamp_email") or last_reply.get("created_at") or ""
-                replied_at = None
-                if ts_raw:
-                    try:
-                        replied_at = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-                        if replied_at.tzinfo is None:
-                            replied_at = replied_at.replace(tzinfo=timezone.utc)
-                    except Exception:
-                        pass
-
-                if replied_at is None or replied_at <= since_dt:
-                    continue
-
-                # Extract and clean body
-                body_text = (last_reply.get("body") or {}).get("text") or ""
-                body_html = (last_reply.get("body") or {}).get("html") or ""
-                raw_body = body_text or strip_html(body_html)
-
-                # Strip quoted history (lines starting with > or "On ... wrote:")
+                # Extract body text; strip quoted history
+                body = em.get("body") or {}
+                if not isinstance(body, dict):
+                    body = {}
+                body_text = body.get("text") or strip_html(body.get("html") or "")
                 clean_lines = []
-                for line in raw_body.split("\n"):
-                    if line.strip().startswith(">") or (line.strip().startswith("On ") and "wrote:" in line):
+                for line in body_text.split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith(">") or (stripped.startswith("On ") and "wrote:" in line):
                         break
                     clean_lines.append(line)
                 reply_text = "\n".join(clean_lines).strip()
+
+                unique_id = f"{campaign_id}:{lead_email}:{ts_raw}"
 
                 results.append({
                     "lead_email": lead_email,
@@ -197,11 +181,13 @@ def fetch_new_replies(since_dt: datetime) -> list:
                     "job_role": job_role,
                     "reply_text": reply_text,
                     "replied_at": replied_at,
+                    "unique_id": unique_id,
                 })
 
-            if len(leads) < limit:
+            next_cursor = data.get("next_starting_after")
+            if not next_cursor or not found_new:
                 break
-            skip += limit
+            cursor = next_cursor
 
     print(f"[instantly] Found {len(results)} new reply(ies) since {since_dt.isoformat()}")
     return results
@@ -263,8 +249,7 @@ def run() -> int:
 
     sent = 0
     for reply in new_replies:
-        replied_date = reply["replied_at"].strftime("%Y-%m-%d") if reply["replied_at"] else "unknown"
-        unique_id = f"{reply['campaign_id']}:{reply['lead_email']}:{replied_date}"
+        unique_id = reply.get("unique_id") or f"{reply['campaign_id']}:{reply['lead_email']}"
 
         if state_manager.is_notified(SOURCE_KEY, unique_id):
             continue

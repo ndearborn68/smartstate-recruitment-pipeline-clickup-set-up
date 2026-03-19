@@ -47,11 +47,13 @@ def _post(path: str, payload: dict) -> dict:
 
 # ── Core fetch logic ─────────────────────────────────────────────────────────
 
-def fetch_conversations(campaign_id: int) -> list:
+def fetch_conversations(campaign_id: int, since_dt: Optional[datetime] = None) -> list:
     """
-    Fetch all conversations for a given Heyreach campaign ID.
-    Handles pagination automatically.
-    Returns list of raw conversation dicts.
+    Fetch conversations from Heyreach, stopping early once all items on a page
+    are older than since_dt (conversations are sorted newest-first by lastMessageAt).
+
+    Note: the campaignId filter is ignored by the API — it returns all conversations
+    regardless. We rely on since_dt to bound the fetch, not campaignId.
     """
     conversations = []
     offset = 0
@@ -64,16 +66,35 @@ def fetch_conversations(campaign_id: int) -> list:
             "limit": limit,
         })
         items = data.get("items", [])
-        total = data.get("totalCount", 0)
 
         if not items:
             break
 
         conversations.extend(items)
-        offset += limit
 
-        if offset >= total:
+        # Early exit: if since_dt is set and the oldest item on this page
+        # is older than since_dt, all subsequent pages will be older too.
+        if since_dt:
+            oldest_ts = None
+            for item in items:
+                raw = item.get("lastMessageAt") or ""
+                if raw:
+                    try:
+                        ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if oldest_ts is None or ts < oldest_ts:
+                            oldest_ts = ts
+                    except Exception:
+                        pass
+            if oldest_ts is not None and oldest_ts <= since_dt:
+                break
+
+        # Also stop if we got a partial page (last page)
+        if len(items) < limit:
             break
+
+        offset += limit
 
     return conversations
 
@@ -126,8 +147,9 @@ def extract_new_messages(conversations: list, since_dt: datetime, campaign_id: i
             if not message_text:
                 continue
 
-            # Build a stable unique ID from campaign + linkedin + timestamp
-            unique_id = f"heyreach:{campaign_id}:{linkedin_url}:{created_raw}"
+            # Unique ID is campaign-agnostic: same message won't re-post even if
+            # queried under different campaignIds (which the API ignores anyway).
+            unique_id = f"heyreach:{linkedin_url}:{created_raw}"
 
             results.append({
                 "lead_name": lead_name,
@@ -173,7 +195,7 @@ def get_clickup_task_url(linkedin_url: str, email: str, list_id: str) -> Optiona
                 break
             for task in tasks:
                 for cf in task.get("custom_fields", []):
-                    val = (cf.get("value") or "").lower().strip()
+                    val = str(cf.get("value") or "").lower().strip()
                     if cf.get("id") == linkedin_field_id and linkedin_lower and val == linkedin_lower:
                         return task.get("url")
                     if cf.get("id") == email_field_id and email_lower and val == email_lower:
@@ -192,69 +214,61 @@ def get_clickup_task_url(linkedin_url: str, email: str, list_id: str) -> Optiona
 
 def run() -> int:
     """
-    Poll all Heyreach campaigns for new messages and post each to Slack.
-    Posts both INBOUND (candidate replies) and OUTBOUND (recruiter sent) messages
-    so you have full conversation visibility.
-    Returns count of new notifications sent.
+    Poll Heyreach for new INBOUND LinkedIn replies and post each to Slack.
+
+    Key design: the Heyreach API's campaignId filter is ignored — it always
+    returns all conversations. So we fetch once (not per-campaign) and use a
+    campaign-agnostic unique_id to prevent duplicates. Job role is labelled
+    "LinkedIn (Heyreach)" since per-lead campaign attribution isn't reliable.
+
+    Returns count of new Slack notifications sent.
     """
     now = datetime.now(timezone.utc)
     since_dt = state_manager.get_last_checked(SOURCE_KEY)
-    print(f"[heyreach] Checking messages since {since_dt.isoformat()}")
+    print(f"[heyreach] Checking replies since {since_dt.isoformat()}")
+
+    # Fetch conversations once — any campaignId gives the same result
+    any_campaign_id = next(iter(config.HEYREACH_CAMPAIGN_TO_ROLE), 0)
+    try:
+        conversations = fetch_conversations(any_campaign_id, since_dt=since_dt)
+    except Exception as e:
+        print(f"[heyreach] fetch_conversations failed: {e}")
+        state_manager.set_last_checked(SOURCE_KEY, now)
+        return 0
+
+    # Extract only INBOUND messages (candidate replied)
+    all_messages = extract_new_messages(conversations, since_dt, any_campaign_id, "LinkedIn (Heyreach)")
+    inbound = [m for m in all_messages if m["direction"] == "INBOUND"]
+    print(f"[heyreach] {len(inbound)} new inbound reply(ies) since {since_dt.isoformat()}")
 
     sent = 0
-
-    for campaign_id, job_role in config.HEYREACH_CAMPAIGN_TO_ROLE.items():
-        print(f"[heyreach] Fetching conversations for: {job_role} (campaign {campaign_id})")
-
-        try:
-            conversations = fetch_conversations(campaign_id)
-        except Exception as e:
-            print(f"[heyreach] fetch_conversations failed for {campaign_id}: {e}")
+    for msg in inbound:
+        if state_manager.is_notified(SOURCE_KEY, msg["unique_id"]):
             continue
 
-        new_messages = extract_new_messages(conversations, since_dt, campaign_id, job_role)
-        print(f"[heyreach] {len(new_messages)} new message(s) for {job_role}")
+        # Mark outbound messages in this conversation as seen (prevents future noise)
+        # (already handled by unique_id dedup for INBOUND only)
 
-        for msg in new_messages:
-            if state_manager.is_notified(SOURCE_KEY, msg["unique_id"]):
-                continue
+        # ClickUp lookup skipped for Heyreach — no reliable way to determine
+        # which list a LinkedIn lead belongs to without a slow full-list scan.
+        clickup_url = None
 
-            # Look up ClickUp task
-            list_id = config.CLICKUP_LIST_IDS.get(job_role)
-            clickup_url = None
-            if list_id:
-                try:
-                    clickup_url = get_clickup_task_url(
-                        msg["lead_linkedin_url"], msg["lead_email"], list_id
-                    )
-                except Exception as e:
-                    print(f"[heyreach] ClickUp lookup failed: {e}")
+        blocks = slack_client.format_reply_block(
+            source="Heyreach (LinkedIn)",
+            candidate_name=msg["lead_name"],
+            job_role=msg["job_role"],
+            campaign="LinkedIn Outreach",
+            message_body=msg["message_text"],
+            clickup_url=clickup_url,
+            replied_at=msg["message_at"],
+        )
 
-            # Only notify on inbound replies (candidate replied)
-            if msg["direction"] != "INBOUND":
-                state_manager.mark_notified(SOURCE_KEY, msg["unique_id"])
-                continue
+        if slack_client.post_message(blocks=blocks):
+            state_manager.mark_notified(SOURCE_KEY, msg["unique_id"])
+            sent += 1
+            print(f"[heyreach] Notified: {msg['lead_name']}")
 
-            source = "Heyreach (LinkedIn)"
-            full_body = msg["message_text"]
-
-            blocks = slack_client.format_reply_block(
-                source=source,
-                candidate_name=msg["lead_name"],
-                job_role=msg["job_role"],
-                campaign=msg["campaign_name"],
-                message_body=full_body,
-                clickup_url=clickup_url,
-                replied_at=msg["message_at"],
-            )
-
-            if slack_client.post_message(blocks=blocks):
-                state_manager.mark_notified(SOURCE_KEY, msg["unique_id"])
-                sent += 1
-                direction_label = "reply" if msg["direction"] == "INBOUND" else "sent msg"
-                print(f"[heyreach] Notified ({direction_label}): {msg['lead_name']} — {msg['job_role']}")
-
-            time.sleep(RATE_LIMIT_DELAY)
+        time.sleep(RATE_LIMIT_DELAY)
 
     state_manager.set_last_checked(SOURCE_KEY, now)
     print(f"[heyreach] Done — {sent} notification(s) sent.")

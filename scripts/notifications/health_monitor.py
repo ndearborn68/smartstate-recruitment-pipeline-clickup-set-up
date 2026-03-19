@@ -52,89 +52,42 @@ def fetch_account_list() -> list:
     Fetch all sending accounts from Instantly.
     Returns list of dicts with at minimum: email, status, daily_limit.
     """
-    data = _get("/account/list", {"limit": 100, "skip": 0})
-    accounts = data if isinstance(data, list) else data.get("accounts", [])
+    data = _get("/accounts", {"limit": 100})
+    accounts = data.get("items", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
     print(f"[health] Found {len(accounts)} sending account(s)")
     return accounts
 
 
-def fetch_account_warmup(email: str) -> dict:
+def classify_health(acct: dict) -> tuple:
     """
-    Fetch warmup/deliverability analytics for one sending account.
-    Returns dict: email, warmup_score, inbox_rate, spam_rate, warmup_enabled, raw_response
+    Classify an account's health status using inline fields from GET /accounts.
+    Instantly v2 includes stat_warmup_score, warmup_status, status, daily_limit
+    directly in the account object — no separate warmup API call needed.
+
+    warmup_status: 1=active, 2=paused/off
+    status: 1=connected, 0=disconnected
+    Returns (status: str, details: str, score: int|None).
     """
-    result = {
-        "email": email,
-        "warmup_score": None,
-        "inbox_rate": None,
-        "spam_rate": None,
-        "warmup_enabled": False,
-        "raw_response": {},
-    }
+    score = acct.get("stat_warmup_score")
+    score = int(score) if score is not None else None
+    warmup_status = acct.get("warmup_status", 1)
+    account_status = acct.get("status", 1)
+    daily_limit = acct.get("daily_limit", "?")
+    warmup_limit = (acct.get("warmup") or {}).get("limit", "?")
+    details = f"Daily limit: {daily_limit} | Warmup: {warmup_limit}/day"
 
-    # Primary endpoint: warmup analytics
-    data = _get("/account/warmup/analytics", {"email": email})
-
-    if data:
-        result["raw_response"] = data
-        result["warmup_enabled"] = data.get("warmup_enabled", data.get("warmupEnabled", False))
-
-        # Score: Instantly may return as "score", "warmup_score", or "health_score"
-        score = (
-            data.get("score") or
-            data.get("warmup_score") or
-            data.get("health_score") or
-            data.get("warmupScore")
-        )
-        if score is not None:
-            try:
-                result["warmup_score"] = int(float(score))
-            except (ValueError, TypeError):
-                pass
-
-        # Inbox/spam rates
-        inbox = data.get("inbox_rate") or data.get("inboxRate") or data.get("inbox_percent")
-        spam = data.get("spam_rate") or data.get("spamRate") or data.get("spam_percent")
-        if inbox is not None:
-            try:
-                result["inbox_rate"] = round(float(inbox), 1)
-            except (ValueError, TypeError):
-                pass
-        if spam is not None:
-            try:
-                result["spam_rate"] = round(float(spam), 1)
-            except (ValueError, TypeError):
-                pass
-
-    return result
-
-
-def classify_health(account: dict) -> tuple:
-    """
-    Classify an account's health status.
-    Returns (status: str, details: str).
-    """
-    score = account.get("warmup_score")
-    enabled = account.get("warmup_enabled", False)
-    inbox = account.get("inbox_rate")
-    spam = account.get("spam_rate")
-
-    inbox_str = f"{inbox}%" if inbox is not None else "N/A"
-    spam_str = f"{spam}%" if spam is not None else "N/A"
-    rate_details = f"Inbox: {inbox_str} | Spam: {spam_str}"
-
-    if not enabled:
-        return ("Warmup Off", "Warmup disabled — enable to track deliverability")
-
+    if account_status == 0:
+        return ("Unknown", "Account disconnected", None)
+    if warmup_status != 1:
+        return ("Warmup Off", details, score)
     if score is None:
-        return ("Unknown", "Could not fetch warmup data")
-
+        return ("Unknown", "No warmup score available", None)
     if score >= 80:
-        return ("Healthy", rate_details)
+        return ("Healthy", details, score)
     elif score >= 50:
-        return ("Warning", f"{rate_details} — monitor closely")
+        return ("Warning", f"{details} — monitor closely", score)
     else:
-        return ("Critical", f"{rate_details} — ACTION REQUIRED")
+        return ("Critical", f"{details} — ACTION REQUIRED", score)
 
 
 # ── Main entry point ─────────────────────────────────────────────────────────
@@ -182,24 +135,11 @@ def run(force: bool = False) -> bool:
         if not email:
             continue
 
-        print(f"[health] Checking: {email}")
-        try:
-            health_data = fetch_account_warmup(email)
-        except Exception as e:
-            print(f"[health] fetch_account_warmup failed for {email}: {e}")
-            health_data = {
-                "email": email,
-                "warmup_score": None,
-                "inbox_rate": None,
-                "spam_rate": None,
-                "warmup_enabled": False,
-            }
-
-        status, details = classify_health(health_data)
+        status, details, score = classify_health(acct)
 
         record = {
             "email": email,
-            "health_score": health_data.get("warmup_score"),
+            "health_score": score,
             "status": status,
             "details": details,
         }

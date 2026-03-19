@@ -38,11 +38,19 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    """Write state to disk atomically using a temp file."""
+    """Write state to disk. Tries atomic rename; falls back to direct write."""
     tmp_path = config.STATE_FILE + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(state, f, indent=2)
-    os.replace(tmp_path, config.STATE_FILE)
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp_path, config.STATE_FILE)
+    except Exception:
+        # Fallback: write directly (non-atomic but won't crash the notifier)
+        try:
+            with open(config.STATE_FILE, "w") as f:
+                json.dump(state, f, indent=2)
+        except Exception as e2:
+            print(f"[State] ERROR: could not save state: {e2}")
 
 
 def get_last_checked(source: str) -> datetime:
