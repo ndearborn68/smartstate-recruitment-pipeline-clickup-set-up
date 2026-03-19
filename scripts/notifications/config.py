@@ -6,7 +6,8 @@ config_local.py is gitignored and should never be committed.
 import os
 
 # --- Slack ---
-SLACK_WEBHOOK_URL = ""  # Paste your Slack incoming webhook URL here
+SLACK_WEBHOOK_URL = ""  # #smartstate-responses — inbound reply notifications
+SLACK_PERFORMANCE_WEBHOOK_URL = ""  # #smartstate-performance — 3x/week performance report
 
 # --- Instantly ---
 INSTANTLY_API_KEY = ""  # Your Instantly API key
