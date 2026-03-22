@@ -43,7 +43,7 @@ Deno.serve(async (_req) => {
   const { data: candidates, error } = await supabase
     .from('candidates')
     .select(`
-      id, name, email, linkedin_url, phone, channels,
+      id, name, email, linkedin_url, phone,
       date_contacted, nonresponder_flagged_at,
       job:jobs(title),
       sources:candidate_sources(
@@ -135,6 +135,8 @@ Deno.serve(async (_req) => {
         .from('candidates')
         .update({ nonresponder_flagged_at: new Date().toISOString() })
         .eq('id', candidate.id)
+    } else {
+      console.error(`[nonresponder] Clay POST failed for ${candidate.name} (${candidate.id}): ${resp.status} ${await resp.text()}`)
     }
   }
 
