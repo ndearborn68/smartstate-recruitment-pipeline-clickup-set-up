@@ -4,6 +4,33 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const CLAY_WEBHOOK = Deno.env.get('CLAY_NONRESPONDER_WEBHOOK') || ''
 const NO_REPLY_DAYS = 2
 
+// Calendly — check if candidate has already booked a call
+const CALENDLY_TOKEN = Deno.env.get('CALENDLY_PAT') || ''
+const CALENDLY_USER_URI = 'https://api.calendly.com/users/EEEG6GUCJVUF2GZ2'
+
+async function hasCalendlyBooking(email: string): Promise<boolean> {
+  if (!email || !CALENDLY_TOKEN) return false
+  try {
+    const url = new URL('https://api.calendly.com/scheduled_events')
+    url.searchParams.set('user', CALENDLY_USER_URI)
+    url.searchParams.set('invitee_email', email)
+    url.searchParams.set('status', 'active')
+    url.searchParams.set('count', '1')
+    const resp = await fetch(url.toString(), {
+      headers: { 'Authorization': `Bearer ${CALENDLY_TOKEN}` },
+    })
+    if (!resp.ok) {
+      console.warn(`[calendly] ${resp.status} for ${email}`)
+      return false
+    }
+    const data = await resp.json()
+    return (data.collection?.length || 0) > 0
+  } catch (e) {
+    console.warn(`[calendly] error for ${email}: ${e}`)
+    return false
+  }
+}
+
 Deno.serve(async (_req) => {
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -36,11 +63,29 @@ Deno.serve(async (_req) => {
   }
 
   let sent = 0
+  let booked = 0
 
   for (const candidate of candidates || []) {
     const jobRole = candidate.job?.title || 'the role'
     const firstName = (candidate.name || '').split(' ')[0] || 'there'
     const sources: any[] = candidate.sources || []
+
+    // Check Calendly — skip if they already booked a call
+    if (candidate.email) {
+      const alreadyBooked = await hasCalendlyBooking(candidate.email)
+      if (alreadyBooked) {
+        console.log(`[nonresponder] ${candidate.name} already booked — updating to scheduled`)
+        await supabase
+          .from('candidates')
+          .update({
+            status: 'screening',
+            nonresponder_flagged_at: new Date().toISOString(),
+          })
+          .eq('id', candidate.id)
+        booked++
+        continue
+      }
+    }
 
     // Determine original outreach channel
     let originalChannel = 'unknown'
@@ -93,8 +138,8 @@ Deno.serve(async (_req) => {
     }
   }
 
-  console.log(`[nonresponder] Sent ${sent} of ${(candidates || []).length} to Clay`)
-  return new Response(JSON.stringify({ sent, total: (candidates || []).length }), {
+  console.log(`[nonresponder] Sent ${sent}, skipped ${booked} (booked), of ${(candidates || []).length} total`)
+  return new Response(JSON.stringify({ sent, booked, total: (candidates || []).length }), {
     headers: { 'Content-Type': 'application/json' }
   })
 })
