@@ -137,6 +137,7 @@ python3 run_all.py --health
 - **`sync_to_clickup.py`** — Fetches leads from Instantly API, creates ClickUp tasks.
 - **`sync_messages.py`** — Pulls emails from Instantly, updates ClickUp Notes + Date Replied.
 - **`sync_heyreach_v2.py`** — Fetches Heyreach conversations, updates ClickUp tasks.
+- **`sync_linkedin_recruiter.py`** — Uses Chrome CDP to pull new LinkedIn Recruiter candidates from the active Recruiter projects and writes them into Supabase for the cloud nonresponder job.
 - **`dedup_clickup.py`** — Finds and removes duplicate tasks within each ClickUp list.
 - **`bulk_sync_remaining.py`** — Syncs remaining Instantly campaigns to ClickUp.
 
@@ -148,7 +149,23 @@ python3 run_all.py --health
 ### Configuration
 - Copy `scripts/notifications/config.py` → `scripts/notifications/config_local.py` and fill in API keys.
 - Copy `scripts/config_template.py` → `scripts/config.py` for sync scripts.
+- Add `SUPABASE_SERVICE_ROLE_KEY=<key>` to repo-root `.env` for `scripts/sync/sync_linkedin_recruiter.py`.
+- `SUPABASE_URL` is optional in `.env`; it defaults to the SmartState project.
 - **Never commit `config_local.py` or `config.py`** — gitignored.
+
+### LinkedIn Recruiter Sync
+```bash
+# Test against a few candidates without writing to Supabase
+python3 scripts/sync/sync_linkedin_recruiter.py --dry-run --limit 3
+
+# Live run
+python3 scripts/sync/sync_linkedin_recruiter.py
+```
+
+Requirements:
+- Chrome must already be running with remote debugging enabled.
+- At least one LinkedIn Recruiter tab must be open.
+- The script restores the Recruiter tab back to its original URL when it finishes.
 
 ## API Keys Required
 | Service | Used For |

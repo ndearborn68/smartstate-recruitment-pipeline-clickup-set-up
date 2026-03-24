@@ -22,6 +22,7 @@ Last updated: 2026-03-22
 
 ## In Progress 🔄
 - [ ] **Twilio outbound SMS** — carrier approval pending (~Mar 25 2026). Once approved, Clay SMS route will activate automatically.
+- [ ] **LinkedIn Recruiter scraper first live run** — `scripts/sync/sync_linkedin_recruiter.py` added; pending `.env` service role key + launchd install + first successful write.
 - [ ] **29 unresolvable names** — need LeadMagic retry (after rate limit resets) or manual lookup:
   `admin, amadogon49, aytunch, billandstacey, bwkim10, cfvalencia9277, cpow85, czerintonkr, djcrazed06, dugda, esteakshapin, gilneas12144, hitcklife, hnzwllms, ichaelm1, jandjincarmel, kcha303, keithythefrog, koshkafilmscompany, mazara27, meeby1030, mgbvox, ranran123, redhedsrrare06, satoshidg3104, showpony64, sta26, tulaneadam21, xtrordinary`
 
@@ -31,8 +32,9 @@ Last updated: 2026-03-22
 
 ### LinkedIn Recruiter Scraper
 - Candidates messaged via LinkedIn Recruiter (not HeyReach) are NOT in the DB
-- Plan: local Python script, launchd daily 9am
-- Scrapes "Awaiting Reply" per Recruiter project → writes to Supabase → nonresponder picks them up
+- Code added: `scripts/sync/sync_linkedin_recruiter.py`
+- Planned schedule: launchd daily at 8:45am, ahead of the 9:00am cloud nonresponder run
+- Pulls project candidates from Recruiter via Chrome CDP, fetches public LinkedIn URLs + InMail timestamps, writes to Supabase, and lets nonresponder pick them up
 - Recruiter projects: PM (1661933460), Flutter (1661750948), HTML CSS (1440335625)
 - Chrome CDP tab tested and works
 
